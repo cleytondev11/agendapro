@@ -1,34 +1,66 @@
-# AgendaPro Beleza — PWA
+# AgendaPro Beleza — agendamento online
 
-App de gestão para **barbearia, lash (extensão de cílios), manicure/pedicure e salão/cabeleireira**.
+Barbearia · Lash (extensão de cílios) · Manicure & Pedicure · Salão / Cabeleireira
 
-## Como usar
-1. Hospede a pasta inteira em qualquer servidor com **HTTPS** (GitHub Pages, Netlify, Vercel ou seu próprio servidor). O PWA só instala e funciona offline em HTTPS ou `localhost`.
-2. Abra o endereço. No **primeiro acesso** você escolhe o nicho, o nome do estabelecimento e cria o login do administrador.
-3. No celular: menu do navegador → **"Adicionar à tela inicial" / "Instalar app"**.
+O **cliente agenda pelo celular dele, de casa**, e o horário aparece **na hora** no painel do dono, com som, aviso na tela e notificação no celular (mesmo com o app fechado).
 
-Para testar no PC: dentro da pasta rode `npx serve` ou `python -m http.server 8080` e abra `http://localhost:8080`.
+```
+Cliente (celular dele)  ──►  SERVIDOR (este projeto)  ◄──  Dono (painel)
+   cria conta, agenda          guarda tudo num só lugar       vê agenda, financeiro,
+   vê / cancela horários       avisa o dono (push)            estoque, compras, vendas
+```
 
-## O que tem
-- **Login e senha** (senhas guardadas com hash SHA-256). Dois perfis:
-  - **Administrador**: tudo abaixo.
-  - **Cliente**: se cadastra sozinho (nome, telefone, senha), agenda escolhendo serviço → profissional → dia → horário livre, vê e cancela os próprios horários.
-- **Dashboard**: faturamento do dia, entradas/saídas/lucro do mês, ticket médio, clientes novos, gráfico de 14 dias, próximos atendimentos, ranking de serviços, alerta de estoque baixo.
-- **Agenda**: por dia e por profissional, sem choque de horários (respeita a duração do serviço), editar, cancelar, concluir (lança a entrada no financeiro com forma de pagamento) e botão de confirmação por WhatsApp.
-- **Vendas** de produtos (baixa no estoque + entrada no financeiro).
-- **Compras** de fornecedores (entrada no estoque, atualiza custo + saída no financeiro).
-- **Estoque**: custo, preço de venda, mínimo, ajuste manual (uso em atendimento/perda), produtos de uso interno.
-- **Financeiro**: entradas e saídas por mês, por forma de pagamento e por categoria, lançamentos manuais (aluguel, luz, comissões…) e exportação CSV (abre no Excel).
-- **Clientes**: histórico de visitas e quanto cada um gastou.
-- **Serviços**: preço e duração; já vem com a lista padrão do nicho escolhido.
-- **Ajustes**: horário de funcionamento, dias de atendimento, intervalo da agenda, profissionais, troca de senha, backup/restauração e troca de nicho.
+## Rodar no seu PC (teste)
+Precisa do **Node.js 18 ou mais novo**. Nenhum pacote para instalar.
+```
+node server.js
+```
+Abra `http://localhost:3000`. No primeiro acesso você escolhe o nicho e cria o login do administrador.
+Os dados ficam em `data/db.json`.
 
-## Importante: onde ficam os dados
-Nesta versão os dados ficam **no aparelho onde o app é usado** (localStorage). Ou seja, o cliente agendando no celular dele **não aparece** no celular do dono até existir um servidor.
-Para clientes agendarem de seus próprios celulares, é preciso um back-end (Node.js + banco, ou Firebase/Supabase). Todo o acesso aos dados passa pelas funções `load()` e `save()` em `app.js`, então é só trocá-las por chamadas à API.
+## Publicar na internet (para os clientes acessarem)
+O app precisa estar em um endereço **https://** para instalar no celular e mandar notificações.
+
+### Opção A — Render + Neon (gratuito para começar)
+1. Suba esta pasta para um repositório no **GitHub**.
+2. Em **neon.tech**, crie um banco PostgreSQL e copie a *connection string* (`postgresql://...`).
+3. Em **render.com** → *New → Web Service* → escolha o repositório.
+   - Build command: `npm install`
+   - Start command: `node server.js`
+   - Environment → adicione `DATABASE_URL` = a connection string do Neon
+   - (opcional) `PUSH_EMAIL` = seu e-mail
+4. O Render dá um endereço tipo `https://sua-barbearia.onrender.com`. Pronto.
+
+> No plano gratuito do Render o servidor "dorme" depois de um tempo sem uso, e a primeira abertura pode demorar cerca de 1 minuto. Para uso profissional, use um plano pago (sem esse atraso). Confira os preços atuais nos sites.
+
+### Opção B — VPS / servidor próprio
+`node server.js` (use `pm2` ou um serviço do sistema para manter ligado) atrás de um HTTPS (Nginx + Let's Encrypt, ou Cloudflare).
+Sem `DATABASE_URL`, os dados ficam em `data/db.json`. Defina `DATA_DIR` para mudar a pasta e faça backup dela.
+
+| Variável | Para quê |
+|---|---|
+| `PORT` | porta (padrão 3000; Render define sozinho) |
+| `DATABASE_URL` | usar PostgreSQL em vez do arquivo |
+| `DATA_DIR` | pasta do `db.json` quando não usar PostgreSQL |
+| `PUSH_EMAIL` | e-mail de contato nas notificações push |
+
+## Depois de publicar
+1. Entre como administrador → **Ajustes**.
+2. **Ativar notificações neste aparelho** (no iPhone: antes adicione o app à Tela de Início, iOS 16.4+).
+3. Copie o **link de agendamento** ou toque em **Enviar no WhatsApp** e mande para seus clientes / coloque no Instagram.
+4. Cliente abre o link → **Criar conta** (nome, telefone, senha) → escolhe serviço, profissional, dia e horário → confirma.
+
+## Funções
+- **Cliente:** cadastro com telefone e senha, agendamento só em horários realmente livres (o servidor confere e bloqueia horário duplicado), meus horários, cancelar, perfil. Limite de 5 horários futuros por cliente.
+- **Dono:** dashboard, agenda (com marca 📱 nos agendamentos feitos pelo app e destaque para os novos), concluir atendimento lançando no financeiro, vendas, compras, estoque, financeiro com CSV, clientes (bloquear acesso), serviços, profissionais, horários e dias de funcionamento, backup.
+- O painel atualiza sozinho a cada 15 segundos e sempre que você volta para o app.
+
+## Segurança
+- Senhas guardadas com *scrypt* (não dá para ler a senha nem no banco).
+- O cliente só enxerga os próprios horários; financeiro, estoque e lista de clientes só para o administrador.
+- Bloqueio de 15 minutos após 10 tentativas de login erradas.
 
 ## Arquivos
-- `index.html` — página do app
-- `app.js` — toda a lógica
-- `style.css` — visual (a cor muda conforme o nicho)
-- `manifest.json`, `sw.js`, `icons/` — partes do PWA (instalação e offline)
+- `server.js` — servidor e API
+- `webpush.js` — notificações push (sem bibliotecas externas)
+- `public/` — o app (PWA): `index.html`, `app.js`, `style.css`, `sw.js`, `manifest.json`, ícones

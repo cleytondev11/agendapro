@@ -1,0 +1,17 @@
+{
+  "name": "agendapro-beleza",
+  "version": "2.0.0",
+  "description": "Agendamento online e gestão para barbearia, lash, manicure/pedicure e salão",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "optionalDependencies": {
+    "pg": "^8.13.0"
+  },
+  "license": "UNLICENSED",
+  "private": true
+}
