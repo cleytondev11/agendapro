@@ -351,7 +351,8 @@ function vDashboard() {
   const top = Object.entries(rank).sort((a, b) => b[1] - a[1]).slice(0, 5);
   const topMax = top[0]?.[1] || 1;
 
-  shell('Dashboard', `<button class="btn" onclick="novoAgendamento()">+ Agendamento</button>`, `
+  shell('Dashboard', `<button class="btn ghost" onclick="formMetas()">🎯 Metas</button><button class="btn" onclick="novoAgendamento()">+ Agendamento</button>`, `
+  ${blocoMetas()}
   <div class="grid kpis">
     <div class="card kpi"><div class="l">Faturamento hoje</div><div class="v">${brl(entHoje)}</div><div class="s">${agHoje.length} atendimento(s) hoje</div></div>
     <div class="card kpi"><div class="l">Entradas no mês</div><div class="v pos">${brl(entMes)}</div><div class="s">${concMes.length} serviços concluídos</div></div>
@@ -376,6 +377,73 @@ function vDashboard() {
     </div>
   </div>`);
   drawChart();
+}
+
+/* ----- metas do mês ----- */
+function diasUteisMes(mes) {
+  const [y, m] = mes.split('-').map(Number), total = new Date(y, m, 0).getDate(), hoje = today(), dias = S.config.dias;
+  let tot = 0, passados = 0, restantes = 0;
+  for (let d = 1; d <= total; d++) {
+    const iso = `${mes}-${pad(d)}`;
+    if (!dias.includes(new Date(iso + 'T12:00').getDay())) continue;
+    tot++;
+    if (iso < hoje) passados++; else restantes++;
+  }
+  return { tot, passados, restantes };
+}
+function realizadoMes(mes) {
+  return {
+    faturamento: S.lancamentos.filter(l => l.tipo === 'entrada' && l.data.startsWith(mes)).reduce((s, l) => s + l.valor, 0),
+    atendimentos: S.agendamentos.filter(a => a.status === 'concluido' && a.data.startsWith(mes)).length,
+    vendas: S.vendas.filter(v => v.data.startsWith(mes)).reduce((s, v) => s + v.total, 0),
+    clientes: S.users.filter(u => u.role === 'cliente' && (u.criado || '').startsWith(mes)).length
+  };
+}
+const METAS = [
+  ['faturamento', '💰 Faturamento', true],
+  ['atendimentos', '✂️ Atendimentos concluídos', false],
+  ['vendas', '🛍️ Venda de produtos', true],
+  ['clientes', '👥 Clientes novos', false]
+];
+function blocoMetas() {
+  const metas = S.config.metas || {}, mes = mesAtual();
+  const ativas = METAS.filter(([k]) => metas[k] > 0);
+  if (!ativas.length) return `<div class="card" style="margin-bottom:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <div style="font-size:1.8rem">🎯</div><div class="grow" style="flex:1;min-width:180px"><b>Defina suas metas do mês</b><div class="mut small">Faturamento, atendimentos, vendas e clientes novos, com o quanto falta por dia.</div></div>
+    <button class="btn sm" onclick="formMetas()">Definir metas</button></div>`;
+  const real = realizadoMes(mes), du = diasUteisMes(mes);
+  const ritmo = du.tot ? du.passados / du.tot : 0;
+  const fmt = (k, v) => METAS.find(m => m[0] === k)[2] ? brl(v) : Math.round(v);
+  const nomeMes = new Date(mes + '-15T12:00').toLocaleDateString('pt-BR', { month: 'long' });
+  return `<div class="card" style="margin-bottom:12px">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px"><h3 style="margin:0">🎯 Metas de ${nomeMes}</h3><span class="mut small">${du.restantes} dia(s) de atendimento restantes</span></div>
+    <div class="metas">${ativas.map(([k, label]) => {
+      const meta = metas[k], feito = real[k], pct = Math.min(100, feito / meta * 100), falta = Math.max(0, meta - feito);
+      const porDia = du.restantes ? falta / du.restantes : falta;
+      const adiantado = feito / meta >= ritmo;
+      const status = feito >= meta ? '<span class="pos">Meta batida! 🎉</span>'
+        : `Faltam <b>${fmt(k, falta)}</b>${du.restantes ? ` · ~${fmt(k, METAS.find(m => m[0] === k)[2] ? porDia : Math.ceil(porDia))}/dia` : ''} · <span class="${adiantado ? 'pos' : 'neg'}">${adiantado ? 'no ritmo' : 'abaixo do ritmo'}</span>`;
+      return `<div class="meta"><div class="lbl"><span>${label}</span><span><b>${fmt(k, feito)}</b> <span class="mut small">de ${fmt(k, meta)} · ${Math.round(feito / meta * 100)}%</span></span></div>
+        <div class="tr"><div class="fl ${feito >= meta ? 'ok' : ''}" style="width:${pct.toFixed(1)}%"></div>${ritmo > 0 && ritmo < 1 ? `<div class="ritmo" style="left:${(ritmo * 100).toFixed(1)}%" title="Onde você deveria estar hoje"></div>` : ''}</div>
+        <div class="s">${status}</div></div>`;
+    }).join('')}</div>
+    <div class="mut small" style="margin-top:10px">A linha branca mostra onde você deveria estar hoje para bater a meta no fim do mês.</div>
+  </div>`;
+}
+function formMetas() {
+  const m = S.config.metas || {};
+  const ant = new Date(mesAtual() + '-01T12:00'); ant.setMonth(ant.getMonth() - 1);
+  const real = realizadoMes(iso(ant).slice(0, 7));
+  openModal('🎯 Metas do mês', `
+  <form>
+    <p class="mut small">Deixe em branco o que não quiser acompanhar. As metas valem para todo mês até você mudar.</p>
+    ${METAS.map(([k, label, dinheiro]) => `<label>${label}${dinheiro ? ' (R$)' : ''} <span class="mut">· mês passado: ${dinheiro ? brl(real[k]) : real[k]}</span></label>
+      <input name="${k}" inputmode="decimal" value="${m[k] || ''}" placeholder="${dinheiro ? 'Ex.: 8000' : 'Ex.: 120'}">`).join('')}
+    ${foot()}
+  </form>`, f => {
+    S.config.metas = Object.fromEntries(METAS.map(([k]) => [k, num(f[k])]));
+    save(); toast('Metas salvas'); go(view);
+  });
 }
 
 function drawChart() {
@@ -420,15 +488,22 @@ function vAgenda() {
   </div>
   <div class="card">
     <div class="small mut" style="margin-bottom:6px">${DIAS[new Date(d + 'T12:00').getDay()]}, ${fmtData(d)} · ${lista.filter(a => a.status !== 'cancelado').length} agendamento(s) · previsto ${brl(prev)}</div>
-    ${lista.length ? `<div class="list">${lista.map(a => `
-      <div class="item ${ui.novos.has(a.id) ? 'novo' : ''}">
-        <div class="hour">${a.hora}</div>
-        <div class="grow"><div class="t">${esc(a.clienteNome)}${tagApp(a)}</div>
-          <div class="d">${esc(a.servicoNome)} · ${brl(a.valor)} · ${a.duracao}min${S.profissionais.length > 1 ? ' · ' + esc(byId('profissionais', a.profId)?.nome || '') : ''}${a.tel ? ' · ' + esc(a.tel) : ''}${a.pagamento ? ' · ' + a.pagamento : ''}${a.obs ? ' · “' + esc(a.obs) + '”' : ''}${a.canceladoPor === 'cliente' ? ' · cancelado pelo cliente' : ''}</div></div>
-        <span class="pill ${a.status}">${a.status}</span>
-        ${a.status === 'agendado' ? `<div class="acts"><button class="btn ok sm" onclick="concluir('${a.id}')">Concluir</button><button class="btn ghost sm" onclick="novoAgendamento('${a.id}')">Editar</button><button class="btn ghost sm" onclick="cancelarAg('${a.id}')">✕</button></div>` : ''}
-        ${a.tel ? `<a class="icon-btn" title="WhatsApp" target="_blank" rel="noopener" href="https://wa.me/55${a.tel.replace(/\D/g, '').replace(/^55(?=\d{10,11}$)/, '')}?text=${encodeURIComponent(`Olá ${a.clienteNome}! Confirmando seu horário em ${S.config.negocio}: ${fmtData(a.data)} às ${a.hora} (${a.servicoNome}).`)}">💬</a>` : ''}
-      </div>`).join('')}</div>` : '<div class="empty">Agenda livre neste dia.</div>'}
+    ${lista.length ? `<div class="list">${lista.map(a => {
+      const extra = [S.profissionais.length > 1 ? esc(byId('profissionais', a.profId)?.nome || '') : '', a.tel ? esc(a.tel) : '', a.pagamento || '', a.obs ? '“' + esc(a.obs) + '”' : '', a.canceladoPor === 'cliente' ? 'cancelado pelo cliente' : ''].filter(Boolean).join(' · ');
+      const wa = a.tel ? `https://wa.me/55${a.tel.replace(/\D/g, '').replace(/^55(?=\d{10,11}$)/, '')}?text=${encodeURIComponent(`Olá ${a.clienteNome}! Confirmando seu horário em ${S.config.negocio}: ${fmtData(a.data)} às ${a.hora} (${a.servicoNome}).`)}` : '';
+      return `<div class="ag ${ui.novos.has(a.id) ? 'novo' : ''} ${a.status}">
+        <div class="ag-hora">${a.hora}<small>${a.duracao} min</small></div>
+        <div class="ag-info">
+          <div class="ag-top"><b>${esc(a.clienteNome)}</b>${tagApp(a)}<span class="pill ${a.status}">${a.status}</span></div>
+          <div class="d">${esc(a.servicoNome)} · <b style="color:var(--tx)">${brl(a.valor)}</b></div>
+          ${extra ? `<div class="d">${extra}</div>` : ''}
+          ${a.status === 'agendado' || wa ? `<div class="ag-acts">
+            ${a.status === 'agendado' ? `<button class="btn ok sm" onclick="concluir('${a.id}')">✓ Concluir</button><button class="btn ghost sm" onclick="novoAgendamento('${a.id}')">Editar</button><button class="btn ghost sm" onclick="cancelarAg('${a.id}')">Cancelar</button>` : ''}
+            ${wa ? `<a class="btn ghost sm" target="_blank" rel="noopener" href="${wa}">💬 WhatsApp</a>` : ''}
+          </div>` : ''}
+        </div>
+      </div>`;
+    }).join('')}</div>` : '<div class="empty">Agenda livre neste dia.</div>'}
   </div>`);
 }
 
@@ -756,7 +831,7 @@ function vConfig() {
           <div class="row"><div><label>Abre às</label><input type="time" name="abre" value="${c.abre}"></div><div><label>Fecha às</label><input type="time" name="fecha" value="${c.fecha}"></div></div>
           <label>Intervalo entre horários (min)</label><select name="intervalo">${[10, 15, 20, 30, 45, 60].map(m => `<option ${m == c.intervalo ? 'selected' : ''}>${m}</option>`).join('')}</select>
           <label>Dias de atendimento</label>
-          <div class="chips">${DIAS.map((d, i) => `<label class="chip ${c.dias.includes(i) ? 'on' : ''}" style="margin:0"><input type="checkbox" name="d${i}" ${c.dias.includes(i) ? 'checked' : ''} class="hidden" onchange="this.parentNode.classList.toggle('on',this.checked)"><b>${d}</b></label>`).join('')}</div>
+          <div class="chips wrap">${DIAS.map((d, i) => `<label class="chip ${c.dias.includes(i) ? 'on' : ''}" style="margin:0"><input type="checkbox" name="d${i}" ${c.dias.includes(i) ? 'checked' : ''} class="hidden" onchange="this.parentNode.classList.toggle('on',this.checked)"><b>${d}</b></label>`).join('')}</div>
           <button class="btn block">Salvar ajustes</button>
         </form>
       </div>

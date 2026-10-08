@@ -148,3 +148,42 @@ th{color:var(--mut);font-size:.75rem;text-transform:uppercase;letter-spacing:.04
 .share{display:flex;gap:8px;align-items:center;margin-top:10px}
 .share input{flex:1;font-size:.85rem}
 .offline{position:fixed;top:0;left:0;right:0;background:var(--bad);color:#fff;text-align:center;font-size:.8rem;font-weight:700;padding:4px;z-index:70}
+
+/* ---------- agenda (cartões que cabem no celular) ---------- */
+.ag{display:grid;grid-template-columns:60px 1fr;gap:12px;padding:14px 0;border-bottom:1px solid var(--line)}
+.ag:last-child{border-bottom:0}
+.ag.cancelado{opacity:.55}
+.ag-hora{font-family:var(--disp);font-size:1.2rem;line-height:1.1}
+.ag-hora small{display:block;font-family:var(--font);font-size:.72rem;color:var(--mut);margin-top:4px}
+.ag-info{min-width:0}
+.ag-top{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.ag-top b{font-size:1rem}
+.ag-top .pill:last-child{margin-left:auto}
+.ag .d{color:var(--mut);font-size:.85rem;margin-top:3px;overflow-wrap:anywhere}
+.ag-acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.ag.novo{animation:flash 2.4s ease-out}
+
+/* ---------- metas ---------- */
+.metas{display:grid;gap:14px}
+.meta .lbl{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
+.meta .lbl b{font-family:var(--disp);font-size:1.15rem}
+.meta .tr{height:10px;background:var(--bg);border-radius:9px;overflow:hidden;margin:8px 0 6px;position:relative}
+.meta .fl{height:100%;border-radius:9px;background:var(--ac);transition:width .6s}
+.meta .fl.ok{background:var(--ok)}
+.meta .ritmo{position:absolute;top:-2px;bottom:-2px;width:2px;background:var(--tx);opacity:.55}
+.meta .s{font-size:.8rem;color:var(--mut)}
+.meta .s .pos,.meta .s .neg{font-weight:700}
+
+/* ---------- nada passa da largura da tela (evita ter que dar zoom) ---------- */
+html,body{overflow-x:hidden}
+.grid>*,.card,.main,.ag-info,.item .grow{min-width:0}
+.item .d,.item .t{overflow-wrap:anywhere}
+input,select,textarea{max-width:100%}
+img,canvas{max-width:100%}
+.chips.wrap{flex-wrap:wrap;overflow:visible}
+@media (max-width:860px){
+  input,select,textarea{font-size:16px} /* evita o zoom automático ao tocar num campo (iPhone) */
+  .filters input[type=date],.filters input[type=month]{flex:1;min-width:0}
+  .ag-acts .btn{flex:1 1 auto}
+  .top .acts .btn{padding:10px 14px}
+}
