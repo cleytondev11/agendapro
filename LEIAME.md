@@ -9,7 +9,7 @@ Os clientes dele agendam por esse link, de casa, e o horário aparece na hora no
 |---|---|
 | `/` | **Site de vendas** (botões de WhatsApp para (61) 99252-2517) |
 | `/central` | **Só você.** Cria, renova, bloqueia e exclui assinantes |
-| `/entrar` | Assinante entra com usuário e senha e cai no painel dele |
+| `/entrar` | Dono **e funcionários** entram com usuário e senha |
 | `/nome-do-negocio` | Link do assinante: painel dele e agendamento dos clientes dele |
 
 ## Central de Acessos (/central)
@@ -27,6 +27,21 @@ Na Central você:
 - **Editar:** nome, nicho, usuário, vencimento, valor, observação.
 - **⋯** : redefinir senha, cobrar no WhatsApp, bloquear/desbloquear, baixar backup, excluir.
 - Vencido ou bloqueado: o painel do assinante e a agenda online ficam suspensos (os dados continuam guardados). Faltando 5 dias, o assinante vê um aviso para renovar.
+
+## Teste grátis de 3 dias (pelo site)
+- No site, a pessoa preenche nome completo, nome da loja, ramo, WhatsApp, e-mail e cria uma senha.
+- A conta é criada na hora (aparece na Central com a marca **Teste grátis** e "via site") e ela já entra no painel. O login é o e-mail.
+- O painel mostra "faltam X dias" e o botão **Assinar agora** (abre o seu WhatsApp).
+- Ao fim dos 3 dias o acesso é bloqueado (dono, funcionários e agenda online). Os dados ficam guardados.
+- Para liberar: Central → **Ativar plano** (+30/90/180/365 dias). O mesmo bloqueio vale para qualquer assinante com vencimento.
+- O mesmo e-mail ou WhatsApp não consegue criar outro teste.
+
+## Funcionários (Equipe)
+- No app do dono: **Mais → Equipe → + Funcionário** (nome, telefone, usuário e senha).
+- O funcionário entra em `/entrar`, vê **só a própria agenda**, conclui atendimentos e recebe notificação **só dos clientes dele**. Financeiro, estoque, vendas e clientes ficam só com o dono.
+
+## Notificações da Central
+- Sino 🔔 na Central: lista de avisos (novo teste grátis, vence amanhã, venceu) e botão para ativar notificação no celular.
 
 ## Rodar no seu PC (teste)
 Precisa do **Node.js 18 ou mais novo**. Nenhum pacote para instalar.

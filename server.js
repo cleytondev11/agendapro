@@ -14,7 +14,9 @@ const DB_URL = process.env.DATABASE_URL;
 const PUSH_SUBJECT = process.env.PUSH_EMAIL ? 'mailto:' + process.env.PUSH_EMAIL : 'mailto:contato@agendapro.app';
 const CENTRAL_USUARIO = (process.env.CENTRAL_USUARIO || 'admin').trim().toLowerCase();
 const CENTRAL_SENHA = process.env.CENTRAL_SENHA || '';
-const SUPORTE = String(process.env.SUPORTE_WHATSAPP || '').replace(/\D/g, '');
+const SUPORTE = String(process.env.SUPORTE_WHATSAPP || '5561992522517').replace(/\D/g, '');
+const DIAS_TESTE = 3;
+const VALOR_PADRAO = 49.9;
 const TZ_PADRAO = 'America/Sao_Paulo';
 const PUBLIC = path.join(__dirname, 'public');
 const COLS = ['users', 'profissionais', 'servicos', 'produtos', 'agendamentos', 'compras', 'vendas', 'lancamentos'];
@@ -22,7 +24,7 @@ const RESERVADOS = new Set(['api', 'central', 'entrar', 'site', 'm', 'icons', 'a
 
 /* ================= armazenamento ================= */
 // meta: { vapid, sessions (da Central) } · empresas: { [slug]: dados da empresa }
-let META = { vapid: null, sessions: {} };
+let META = { vapid: null, sessions: {}, centralSubs: [], eventos: [], lidosAte: '', testesUsados: [] };
 const EMP = {};
 let pool;
 const INICIO = new Date().toISOString();
@@ -172,9 +174,11 @@ function slugLivre(nome) {
   while (EMP[s] || RESERVADOS.has(s)) s = `${base}-${i++}`;
   return s;
 }
+const LOGIN_RE = /^[a-z0-9._@+-]{3,80}$/;
+// Usuário de dono e de funcionário é único no sistema todo (o /entrar procura em todas as empresas).
 function loginEmUso(login, excetoSlug, excetoId) {
   for (const [slug, E] of Object.entries(EMP))
-    if (E.users.some(u => u.role === 'admin' && u.login === login && !(slug === excetoSlug && u.id === excetoId))) return true;
+    if (E.users.some(u => (u.role === 'admin' || u.role === 'func') && u.login === login && !(slug === excetoSlug && u.id === excetoId))) return true;
   return false;
 }
 
@@ -204,9 +208,16 @@ function slotsLivres(E, data, profId, duracao) {
 }
 
 // Envia para todos os aparelhos do dono. Remove inscrições mortas (404/410) ou feitas com outra chave (401/403).
-async function pushAdmins(E, title, body) {
+// profId: só o funcionário dessa agenda (e o dono) recebem. apenasUid: só os aparelhos desse usuário.
+async function pushAdmins(E, title, body, profId, apenasUid) {
   const payload = JSON.stringify({ title, body, url: '/' + E.meta.slug });
-  const subs = [...E.pushSubs];
+  const subs = E.pushSubs.filter(s => {
+    if (apenasUid) return s.uid === apenasUid;
+    const u = E.users.find(u => u.id === s.uid);
+    if (!u) return false;
+    if (u.role === 'admin') return true;
+    return u.role === 'func' && profId && u.profId === profId;
+  });
   const res = await Promise.all(subs.map(s => webpush.send(s.sub, payload, META.vapid, PUSH_SUBJECT)
     .then(() => ({ ok: true, aparelho: s.aparelho || '' }))
     .catch(err => ({ ok: false, aparelho: s.aparelho || '', status: err.statusCode || 0, erro: err.message, sub: s }))));
@@ -216,6 +227,44 @@ async function pushAdmins(E, title, body) {
   E.meta.ultimoPush = { em: new Date().toISOString(), enviados: res.filter(r => r.ok).length, falhas: res.filter(r => !r.ok).length };
   return res.map(({ sub, ...r }) => r);
 }
+
+/* ----- notificações da Central ----- */
+function evento(tipo, titulo, texto, slug) {
+  META.eventos.unshift({ id: uid(), tipo, titulo, texto, slug: slug || '', em: new Date().toISOString() });
+  META.eventos = META.eventos.slice(0, 200);
+  marcar('meta'); flush();
+  pushCentral(titulo, texto);
+}
+async function pushCentral(title, body) {
+  const payload = JSON.stringify({ title, body, url: '/central' });
+  const subs = [...META.centralSubs];
+  const res = await Promise.all(subs.map(s => webpush.send(s.sub, payload, META.vapid, PUSH_SUBJECT)
+    .then(() => ({ ok: true, aparelho: s.aparelho || '' }))
+    .catch(err => ({ ok: false, aparelho: s.aparelho || '', status: err.statusCode || 0, erro: err.message, sub: s }))));
+  const mortas = res.filter(r => !r.ok && [401, 403, 404, 410].includes(r.status)).map(r => r.sub);
+  if (mortas.length) { META.centralSubs = META.centralSubs.filter(x => !mortas.includes(x)); marcar('meta'); flush(); }
+  res.filter(r => !r.ok).forEach(r => console.warn('[push central] falhou:', r.erro));
+  return res.map(({ sub, ...r }) => r);
+}
+// Uma vez por hora: avisa (Central e dono) quem vence amanhã e quem venceu.
+function verificarVencimentos() {
+  const hoje = hojeSP(), amanha = somaDias(hoje, 1);
+  for (const E of Object.values(EMP)) {
+    const m = E.meta; if (!m.vence || m.bloqueado) continue;
+    m.avisos = m.avisos || {};
+    const nome = E.config.negocio, oque = m.trial ? 'O teste grátis' : 'A assinatura';
+    if (m.vence === amanha && m.avisos.v1 !== m.vence) {
+      m.avisos.v1 = m.vence; salvar(E);
+      evento('vence', `⏳ ${nome}: vence amanhã`, `${oque} termina em ${fmtData(m.vence)}. Hora de chamar no WhatsApp.`, m.slug);
+      pushAdmins(E, m.trial ? '⏳ Seu teste grátis termina amanhã' : '⏳ Sua assinatura vence amanhã', `Renove para continuar usando o AgendaPro. Valor: R$ ${Number(m.valor || VALOR_PADRAO).toFixed(2).replace('.', ',')}/mês.`);
+    }
+    if (hoje > m.vence && m.avisos.v0 !== m.vence) {
+      m.avisos.v0 = m.vence; salvar(E);
+      evento('venceu', `⛔ ${nome}: ${m.trial ? 'teste terminou' : 'assinatura vencida'}`, `${oque} venceu em ${fmtData(m.vence)}. O acesso foi bloqueado.`, m.slug);
+    }
+  }
+}
+setInterval(verificarVencimentos, 60 * 60e3);
 
 /* ----- proteção de login ----- */
 const tentativas = new Map();
@@ -242,9 +291,10 @@ route('POST', '/api/login-dono', null, (req, b) => {
   if (bloqueado(req.ip)) fail(429, 'Muitas tentativas. Aguarde 15 minutos.');
   const login = str(b.login).toLowerCase();
   for (const E of Object.values(EMP)) {
-    const u = E.users.find(u => u.role === 'admin' && u.login === login);
+    const u = E.users.find(u => (u.role === 'admin' || u.role === 'func') && u.login === login);
     if (u && checkPw(b.senha, u.senha)) {
-      if (situacao(E) !== 'ativa') fail(403, 'Acesso suspenso. Fale com o suporte para renovar.');
+      if (u.bloqueado) fail(403, 'Seu acesso foi desativado. Fale com o responsável.');
+      if (situacao(E) !== 'ativa') fail(403, E.meta.trial ? 'Seu teste grátis terminou. Fale com o suporte para assinar.' : 'Acesso suspenso. Fale com o suporte para renovar.');
       const token = novaSessao(E.sessions, u.id); salvar(E);
       return { slug: E.meta.slug, token };
     }
@@ -255,8 +305,12 @@ route('POST', '/api/login-dono', null, (req, b) => {
 /* ----- empresa: público ----- */
 route('GET', T + '/public', 'empresa', req => {
   const E = req.E, sit = situacao(E);
+  // Quem está abrindo (se já entrou antes): usado para mostrar a mensagem certa quando o acesso está suspenso.
+  const ses = E.sessions[String(req.headers.authorization || '').replace(/^Bearer /, '')];
+  const papel = ses && ses.exp > Date.now() ? E.users.find(u => u.id === ses.uid)?.role || '' : '';
   return {
-    configured: true, situacao: sit, suporte: SUPORTE,
+    papel,
+    configured: true, situacao: sit, suporte: SUPORTE, trial: !!E.meta.trial, valor: E.meta.valor || VALOR_PADRAO,
     config: { negocio: E.config.negocio, nicho: E.config.nicho, abre: E.config.abre, fecha: E.config.fecha, intervalo: E.config.intervalo, dias: E.config.dias, tz: E.config.tz },
     servicos: sit === 'ativa' ? E.servicos.filter(s => s.ativo !== false).map(({ id, nome, preco, duracao }) => ({ id, nome, preco, duracao })) : [],
     profissionais: sit === 'ativa' ? E.profissionais.filter(p => p.ativo !== false).map(({ id, nome }) => ({ id, nome })) : [],
@@ -291,7 +345,7 @@ route('POST', T + '/register', 'empresa', (req, b) => {
 });
 
 route('POST', T + '/logout', 'any', req => { delete req.E.sessions[req.token]; salvar(req.E); return { ok: true }; });
-route('GET', T + '/me', 'any', req => ({ user: pubUser(req.user), assinatura: req.user.role === 'admin' ? { vence: req.E.meta.vence || '' } : undefined }));
+route('GET', T + '/me', 'any', req => ({ user: pubUser(req.user), assinatura: req.user.role !== 'cliente' ? { vence: req.E.meta.vence || '', trial: !!req.E.meta.trial, valor: req.E.meta.valor || VALOR_PADRAO } : undefined }));
 route('PUT', T + '/me', 'any', (req, b) => {
   if (str(b.nome)) req.user.nome = str(b.nome, 80);
   if (b.senha) { if (String(b.senha).length < 4) fail(400, 'Senha muito curta.'); req.user.senha = hashPw(b.senha); }
@@ -315,7 +369,7 @@ route('POST', T + '/agendar', 'any', (req, b) => {
   const a = { id: uid(), status: 'agendado', criadoPor: 'cliente', criadoEm: new Date().toISOString(), clienteId: req.user.id, clienteNome: req.user.nome, tel: req.user.tel, servicoId: sv.id, servicoNome: sv.nome, valor: sv.preco, duracao: sv.duracao, profId: pr.id, data: b.data, hora: b.hora, obs: str(b.obs, 200) };
   E.agendamentos.push(a);
   changed(E);
-  pushAdmins(E, '📅 Novo agendamento', `${a.clienteNome} — ${a.servicoNome}\n${fmtData(a.data)} às ${a.hora}`);
+  pushAdmins(E, '📅 Novo agendamento', `${a.clienteNome} — ${a.servicoNome}\n${fmtData(a.data)} às ${a.hora}${E.profissionais.length > 1 ? ' · ' + pr.nome : ''}`, a.profId);
   return { agendamento: a };
 });
 route('GET', T + '/meus', 'any', req => ({ agendamentos: req.E.agendamentos.filter(a => a.clienteId === req.user.id) }));
@@ -324,22 +378,52 @@ route('POST', T + '/meus/:id/cancelar', 'any', (req, b, p) => {
   if (!a || a.status !== 'agendado') fail(404, 'Agendamento não encontrado.');
   a.status = 'cancelado'; a.canceladoPor = 'cliente';
   changed(E);
-  pushAdmins(E, '❌ Agendamento cancelado', `${a.clienteNome} cancelou ${a.servicoNome}\n${fmtData(a.data)} às ${a.hora}`);
+  pushAdmins(E, '❌ Agendamento cancelado', `${a.clienteNome} cancelou ${a.servicoNome}\n${fmtData(a.data)} às ${a.hora}`, a.profId);
   return { ok: true };
 });
 
 /* ----- empresa: dono ----- */
-function snapshot(E) {
+function snapshot(E, user) {
+  if (user && user.role === 'func') {
+    // Funcionário: só a própria agenda, os serviços e a lista de clientes (nome e telefone).
+    const meus = E.agendamentos.filter(a => a.profId === user.profId);
+    const ids = new Set(meus.map(a => a.id));
+    return {
+      config: E.config, servicos: E.servicos, profissionais: E.profissionais.map(({ id, nome, ativo }) => ({ id, nome, ativo })),
+      users: E.users.filter(u => u.role === 'cliente').map(({ id, nome, tel, role }) => ({ id, nome, tel, role })),
+      agendamentos: meus, lancamentos: E.lancamentos.filter(l => ids.has(l.ref)),
+      produtos: [], compras: [], vendas: []
+    };
+  }
   const d = { config: E.config };
   for (const c of COLS) d[c] = c === 'users' ? E.users.map(pubUser) : E[c];
   return d;
 }
-route('GET', T + '/db', 'admin', req => {
+route('GET', T + '/db', 'staff', req => {
   const v = +req.query.get('v');
-  return v === req.E.version ? { v, same: true } : { v: req.E.version, data: snapshot(req.E) };
+  return v === req.E.version ? { v, same: true } : { v: req.E.version, data: snapshot(req.E, req.user) };
 });
-route('POST', T + '/sync', 'admin', (req, b) => {
+// Funcionário só altera agendamentos da própria agenda e lança a entrada ao concluir.
+function syncFuncionario(E, user, changes) {
+  for (const ch of changes) {
+    const doc = ch.doc;
+    if (ch.op !== 'put' || !doc || typeof doc.id !== 'string') continue;
+    if (ch.col === 'agendamentos') {
+      const ex = E.agendamentos.find(a => a.id === doc.id);
+      if (doc.profId !== user.profId || (ex && ex.profId !== user.profId)) continue;
+      if (ex) Object.assign(ex, doc); else E.agendamentos.push(doc);
+    } else if (ch.col === 'lancamentos') {
+      const ag = E.agendamentos.find(a => a.id === doc.ref);
+      if (doc.tipo !== 'entrada' || !ag || ag.profId !== user.profId || E.lancamentos.some(l => l.id === doc.id)) continue;
+      E.lancamentos.push({ ...doc, por: user.nome });
+    }
+  }
+  changed(E);
+  return { v: E.version };
+}
+route('POST', T + '/sync', 'staff', (req, b) => {
   const E = req.E;
+  if (req.user.role === 'func') return syncFuncionario(E, req.user, Array.isArray(b.changes) ? b.changes : []);
   for (const ch of Array.isArray(b.changes) ? b.changes : []) {
     if (ch.col === 'config') {
       if (ch.doc && typeof ch.doc === 'object') { const { nicho, ...resto } = ch.doc; E.config = { ...E.config, ...resto }; } // nicho só pela Central
@@ -358,7 +442,7 @@ route('POST', T + '/sync', 'admin', (req, b) => {
       const { novaSenha, hasSenha, senha, ...clean } = doc;
       const ex = arr.find(u => u.id === doc.id);
       if (ex) {
-        const keep = { senha: ex.senha, role: ex.role, ...(ex.role === 'admin' ? { login: ex.login, bloqueado: false } : {}) };
+        const keep = { senha: ex.senha, role: ex.role, ...(ex.role === 'admin' ? { login: ex.login, bloqueado: false } : {}), ...(ex.role === 'func' ? { login: ex.login, profId: ex.profId } : {}) };
         Object.assign(ex, clean, keep);
         if (novaSenha && ex.role === 'cliente') ex.senha = hashPw(novaSenha);
       } else arr.push({ ...clean, role: 'cliente', senha: novaSenha ? hashPw(novaSenha) : '' });
@@ -379,7 +463,7 @@ route('POST', T + '/senha', 'admin', (req, b) => {
   req.user.senha = hashPw(b.nova);
   changed(req.E); return { ok: true };
 });
-route('POST', T + '/push/subscribe', 'admin', (req, b) => {
+route('POST', T + '/push/subscribe', 'staff', (req, b) => {
   const E = req.E;
   if (!b.sub?.endpoint || !b.sub?.keys?.p256dh) fail(400, 'Inscrição inválida.');
   E.pushSubs = E.pushSubs.filter(s => s.sub.endpoint !== b.sub.endpoint);
@@ -387,13 +471,51 @@ route('POST', T + '/push/subscribe', 'admin', (req, b) => {
   if (E.pushSubs.length > 20) E.pushSubs = E.pushSubs.slice(-20);
   salvar(E); return { ok: true, aparelhos: E.pushSubs.length };
 });
-route('POST', T + '/push/teste', 'admin', async req => {
-  const resultados = await pushAdmins(req.E, '🔔 Teste do AgendaPro', 'Notificações funcionando! Você será avisado a cada novo agendamento.');
-  return { resultados, aparelhos: req.E.pushSubs.length };
+route('POST', T + '/push/teste', 'staff', async req => {
+  const resultados = await pushAdmins(req.E, '🔔 Teste do AgendaPro', 'Notificações funcionando! Você será avisado a cada novo agendamento.', null, req.user.id);
+  return { resultados, aparelhos: resultados.length };
 });
-route('POST', T + '/push/remover', 'admin', (req, b) => {
+route('POST', T + '/push/remover', 'staff', (req, b) => {
   req.E.pushSubs = req.E.pushSubs.filter(s => s.sub.endpoint !== b.endpoint); salvar(req.E); return { ok: true };
 });
+/* ----- equipe (funcionários com acesso ao app) ----- */
+route('POST', T + '/equipe', 'admin', async (req, b) => {
+  const E = req.E, nome = str(b.nome, 80);
+  let pr = b.profId ? E.profissionais.find(p => p.id === b.profId) : null;
+  if (b.profId && !pr) fail(404, 'Funcionário não encontrado.');
+  if (!pr) { if (!nome) fail(400, 'Informe o nome do funcionário.'); pr = { id: uid(), nome, ativo: true }; E.profissionais.push(pr); }
+  if (nome) pr.nome = nome;
+  if (b.tel !== undefined) pr.tel = str(b.tel, 30);
+  if (b.ativo !== undefined) pr.ativo = !!b.ativo;
+  let u = E.users.find(x => x.role === 'func' && x.profId === pr.id);
+  if (b.login) {
+    const login = str(b.login, 80).toLowerCase();
+    if (!LOGIN_RE.test(login)) fail(400, 'Usuário: mínimo 3 caracteres, sem espaços nem acentos.');
+    if (loginEmUso(login, E.meta.slug, u?.id) || E.users.some(x => x.login === login && x.id !== u?.id)) fail(409, 'Esse usuário já está em uso. Escolha outro (ex.: nome.sobrenome).');
+    if (!u && String(b.senha || '').length < 4) fail(400, 'Crie uma senha com pelo menos 4 caracteres.');
+    if (!u) { u = { id: uid(), role: 'func', profId: pr.id, criado: hojeSP() }; E.users.push(u); }
+    u.login = login;
+  }
+  if (u) {
+    u.nome = pr.nome; u.tel = pr.tel || '';
+    if (b.senha) { if (String(b.senha).length < 4) fail(400, 'Senha: mínimo 4 caracteres.'); u.senha = hashPw(b.senha); for (const [k, s] of Object.entries(E.sessions)) if (s.uid === u.id) delete E.sessions[k]; }
+    u.bloqueado = pr.ativo === false;
+    if (u.bloqueado) for (const [k, s] of Object.entries(E.sessions)) if (s.uid === u.id) delete E.sessions[k];
+  }
+  changed(E); if (!(await gravarAgora())) fail(503, ERRO_BANCO);
+  return { ok: true, profId: pr.id };
+});
+route('DELETE', T + '/equipe/:profId/acesso', 'admin', async (req, b, p) => {
+  const E = req.E, u = E.users.find(x => x.role === 'func' && x.profId === p.profId);
+  if (u) {
+    E.users = E.users.filter(x => x !== u);
+    for (const [k, s] of Object.entries(E.sessions)) if (s.uid === u.id) delete E.sessions[k];
+    E.pushSubs = E.pushSubs.filter(s => s.uid !== u.id);
+  }
+  changed(E); if (!(await gravarAgora())) fail(503, ERRO_BANCO);
+  return { ok: true };
+});
+
 route('GET', T + '/backup', 'admin', req => {
   const d = { config: req.E.config, backupEm: new Date().toISOString() };
   for (const c of COLS) d[c] = req.E[c];
@@ -406,7 +528,7 @@ route('POST', T + '/restore', 'admin', (req, b) => {
   E.config = { ...b.config, nicho };
   for (const c of COLS) if (c !== 'users' && Array.isArray(b[c])) E[c] = b[c];
   // usuários: mantém o dono atual e restaura só os clientes
-  E.users = E.users.filter(u => u.role === 'admin').concat(b.users.filter(u => u.role === 'cliente').map(u => ({ ...u, senha: u.senha && u.senha.includes(':') ? u.senha : '' })));
+  E.users = E.users.filter(u => u.role === 'admin' || u.role === 'func').concat(b.users.filter(u => u.role === 'cliente').map(u => ({ ...u, senha: u.senha && u.senha.includes(':') ? u.senha : '' })));
   changed(E); return { ok: true };
 });
 
@@ -432,25 +554,28 @@ function resumo(E) {
     agMes: E.agendamentos.filter(a => (a.data || '').startsWith(mes) && a.status !== 'cancelado').length,
     agApp: E.agendamentos.filter(a => (a.data || '').startsWith(mes) && a.criadoPor === 'cliente').length,
     ultimoUso: E.agendamentos.map(a => a.criadoEm || '').sort().pop()?.slice(0, 10) || '',
-    aparelhosPush: E.pushSubs.length
+    aparelhosPush: E.pushSubs.length, trial: !!E.meta.trial, email: E.meta.email || '', origem: E.meta.origem || '',
+    funcionarios: E.users.filter(u => u.role === 'func').length
   };
 }
 route('GET', '/api/central/empresas', 'central', () => ({
   banco: { tipo: pool ? 'postgres' : 'arquivo', pendentes: sujos.size, ultimaGravacao: ST.ultimaGravacao, ultimoErro: sujos.size ? ST.ultimoErro : '', iniciadoEm: INICIO },
-  hoje: hojeSP(), suporte: SUPORTE, empresas: Object.values(EMP).map(resumo).sort((a, b) => a.negocio.localeCompare(b.negocio)) }));
+  hoje: hojeSP(), suporte: SUPORTE, vapidPublic: META.vapid?.publicKey, aparelhosCentral: META.centralSubs.length,
+  eventos: META.eventos.slice(0, 60), lidosAte: META.lidosAte || '', naoLidos: META.eventos.filter(e => e.em > (META.lidosAte || '')).length,
+  empresas: Object.values(EMP).map(resumo).sort((a, b) => a.negocio.localeCompare(b.negocio)) }));
 
-route('POST', '/api/central/empresas', 'central', async (req, b) => {
-  const negocio = str(b.negocio, 80), nicho = str(b.nicho, 30), login = str(b.login, 60).toLowerCase();
+async function criarEmpresa(b, extraMeta = {}) {
+  const negocio = str(b.negocio, 80), nicho = str(b.nicho, 30), login = str(b.login, 80).toLowerCase();
   if (!negocio) fail(400, 'Informe o nome do negócio.');
   if (!NICHOS[nicho]) fail(400, 'Escolha o nicho.');
-  if (!/^[a-z0-9._@-]{3,60}$/.test(login)) fail(400, 'Usuário: mínimo 3 caracteres, sem espaços nem acentos.');
+  if (!LOGIN_RE.test(login)) fail(400, 'Usuário: mínimo 3 caracteres, sem espaços nem acentos.');
   if (String(b.senha || '').length < 4) fail(400, 'Senha: mínimo 4 caracteres.');
   if (loginEmUso(login)) fail(409, 'Esse usuário já está em uso por outro assinante.');
   let slug = slugify(b.slug || negocio);
   if (b.slug) { if (EMP[slug] || RESERVADOS.has(slug)) fail(409, `O link /${slug} já está em uso.`); }
   else slug = slugLivre(negocio);
   const E = blankEmp(), hoje = hojeSP(), N = NICHOS[nicho];
-  E.meta = { slug, criado: hoje, vence: isoData(b.vence) ? b.vence : '', bloqueado: false, valor: n(b.valor), donoTel: str(b.donoTel, 30), obs: str(b.obs, 300) };
+  E.meta = { slug, criado: hoje, vence: isoData(b.vence) ? b.vence : '', bloqueado: false, valor: n(b.valor), donoTel: str(b.donoTel, 30), email: str(b.email, 120).toLowerCase(), obs: str(b.obs, 300), trial: !!b.trial, ...extraMeta };
   E.config = { negocio, nicho, abre: '09:00', fecha: '19:00', intervalo: 30, dias: [1, 2, 3, 4, 5, 6], tz: TZ_PADRAO };
   const dono = { id: uid(), nome: str(b.dono, 80) || negocio, login, senha: hashPw(b.senha), role: 'admin', tel: str(b.donoTel, 30), criado: hoje };
   E.users.push(dono);
@@ -459,8 +584,44 @@ route('POST', '/api/central/empresas', 'central', async (req, b) => {
   E.produtos = N.produtos.map(([nome, custo, preco, qtd]) => ({ id: uid(), nome, custo, preco, qtd, min: Math.max(2, Math.round(qtd / 3)) }));
   EMP[slug] = E; changed(E);
   if (!(await gravarAgora())) { delete EMP[slug]; sujos.delete('t:' + slug); fail(503, ERRO_BANCO); }
-  return { empresa: resumo(E) };
+  return E;
+}
+route('POST', '/api/central/empresas', 'central', async (req, b) => ({ empresa: resumo(await criarEmpresa(b)) }));
+
+/* ----- teste grátis pelo site ----- */
+const cadastrosIp = new Map();
+route('POST', '/api/teste', null, async (req, b) => {
+  const nome = str(b.nome, 80), loja = str(b.loja, 80), nicho = str(b.nicho, 30), email = str(b.email, 120).toLowerCase(), whats = digits(b.whatsapp);
+  if (nome.split(/\s+/).length < 2) fail(400, 'Informe seu nome completo.');
+  if (loja.length < 2) fail(400, 'Informe o nome da sua loja.');
+  if (!NICHOS[nicho]) fail(400, 'Escolha o seu ramo.');
+  if (whats.length < 10 || whats.length > 13) fail(400, 'Informe um WhatsApp com DDD.');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) || !LOGIN_RE.test(email)) fail(400, 'Informe um e-mail válido.');
+  if (String(b.senha || '').length < 6) fail(400, 'Crie uma senha com pelo menos 6 caracteres.');
+  const tel = whats.replace(/^55(?=\d{10,11}$)/, '');
+  const ja = Object.values(EMP).find(E => E.meta.email === email || digits(E.meta.donoTel).replace(/^55(?=\d{10,11}$)/, '') === tel || E.users.some(u => u.role === 'admin' && u.login === email));
+  if (ja || META.testesUsados.includes(email) || META.testesUsados.includes(tel)) fail(409, 'Já existe uma conta com esse e-mail ou WhatsApp. Entre em /entrar ou chame no WhatsApp para assinar.');
+  const ip = cadastrosIp.get(req.ip) || []; const recentes = ip.filter(t => Date.now() - t < 864e5);
+  if (recentes.length >= 3) fail(429, 'Muitos cadastros deste aparelho hoje. Chame no WhatsApp.');
+  cadastrosIp.set(req.ip, [...recentes, Date.now()]);
+  const vence = somaDias(hojeSP(), DIAS_TESTE);
+  const E = await criarEmpresa({ negocio: loja, nicho, login: email, senha: b.senha, dono: nome, donoTel: str(b.whatsapp, 30), email, vence, valor: VALOR_PADRAO, trial: true, obs: 'Teste grátis pelo site' }, { origem: 'site' });
+  META.testesUsados.push(email, tel); marcar('meta');
+  const dono = E.users.find(u => u.role === 'admin');
+  const token = novaSessao(E.sessions, dono.id); salvar(E);
+  evento('teste', `🎉 Novo teste grátis: ${loja}`, `${nome} · ${NICHOS[nicho].label} · WhatsApp ${str(b.whatsapp, 30)} · ${email}`, E.meta.slug);
+  return { slug: E.meta.slug, token, login: email, vence };
 });
+
+route('POST', '/api/central/eventos/lidos', 'central', () => { META.lidosAte = new Date().toISOString(); marcar('meta'); flush(); return { ok: true }; });
+route('POST', '/api/central/push/subscribe', 'central', (req, b) => {
+  if (!b.sub?.endpoint || !b.sub?.keys?.p256dh) fail(400, 'Inscrição inválida.');
+  META.centralSubs = META.centralSubs.filter(s => s.sub.endpoint !== b.sub.endpoint);
+  META.centralSubs.push({ sub: b.sub, aparelho: str(b.aparelho, 60), em: new Date().toISOString() });
+  META.centralSubs = META.centralSubs.slice(-10);
+  marcar('meta'); flush(); return { ok: true, aparelhos: META.centralSubs.length };
+});
+route('POST', '/api/central/push/teste', 'central', async () => ({ resultados: await pushCentral('🔔 Central AgendaPro', 'Notificações da Central funcionando! Você será avisado de cada teste grátis novo e dos vencimentos.') }));
 
 const empCentral = slug => EMP[slug] || fail(404, 'Empresa não encontrada.');
 route('PUT', '/api/central/empresas/:slug', 'central', async (req, b, p) => {
@@ -476,11 +637,13 @@ route('PUT', '/api/central/empresas/:slug', 'central', async (req, b, p) => {
   if (b.donoTel !== undefined) E.meta.donoTel = str(b.donoTel, 30);
   if (b.obs !== undefined) E.meta.obs = str(b.obs, 300);
   if (b.bloqueado !== undefined) E.meta.bloqueado = !!b.bloqueado;
+  if (b.trial !== undefined) E.meta.trial = !!b.trial;
+  if (b.email !== undefined) E.meta.email = str(b.email, 120).toLowerCase();
   const dono = E.users.find(u => u.role === 'admin');
   if (b.dono !== undefined && str(b.dono) && dono) dono.nome = str(b.dono, 80);
   if (b.login !== undefined && dono) {
     const login = str(b.login, 60).toLowerCase();
-    if (!/^[a-z0-9._@-]{3,60}$/.test(login)) fail(400, 'Usuário inválido.');
+    if (!LOGIN_RE.test(login)) fail(400, 'Usuário inválido.');
     if (loginEmUso(login, E.meta.slug, dono.id)) fail(409, 'Esse usuário já está em uso por outro assinante.');
     dono.login = login;
   }
@@ -490,7 +653,7 @@ route('PUT', '/api/central/empresas/:slug', 'central', async (req, b, p) => {
 route('POST', '/api/central/empresas/:slug/renovar', 'central', async (req, b, p) => {
   const E = empCentral(p.slug), dias = Math.min(Math.max(parseInt(b.dias) || 30, 1), 3660);
   const base = E.meta.vence && E.meta.vence > hojeSP() ? E.meta.vence : hojeSP();
-  E.meta.vence = somaDias(base, dias); E.meta.bloqueado = false;
+  E.meta.vence = somaDias(base, dias); E.meta.bloqueado = false; E.meta.trial = false; E.meta.avisos = {};
   changed(E); if (!(await gravarAgora())) fail(503, ERRO_BANCO);
   return { empresa: resumo(E) };
 });
@@ -597,6 +760,7 @@ const server = http.createServer(async (req, res) => {
         const u = E.users.find(u => u.id === s.uid);
         if (!u || u.bloqueado) fail(401, 'Faça login novamente.');
         if (r.auth === 'admin' && u.role !== 'admin') fail(403, 'Acesso restrito ao administrador.');
+        if (r.auth === 'staff' && u.role !== 'admin' && u.role !== 'func') fail(403, 'Acesso restrito à equipe.');
         req.user = u;
       }
       if (situacao(E) !== 'ativa' && !url.pathname.endsWith('/public')) fail(423, situacao(E) === 'vencida' ? 'Assinatura vencida. Fale com o suporte para renovar.' : 'Acesso suspenso. Fale com o suporte.');
@@ -609,5 +773,5 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-loadDB().then(() => server.listen(PORT, () => console.log(`AgendaPro rodando em http://localhost:${PORT}  ·  Central: /central`)))
+loadDB().then(() => { setTimeout(verificarVencimentos, 5000); return server.listen(PORT, () => console.log(`AgendaPro rodando em http://localhost:${PORT}  ·  Central: /central`)); })
   .catch(e => { console.error('Não foi possível iniciar:', e); process.exit(1); });

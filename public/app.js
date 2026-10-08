@@ -12,6 +12,9 @@ const CAT_SAIDA = ['Aluguel', 'Energia/Água', 'Internet', 'Salários/Comissões
 const CAT_ENTRADA = ['Serviço', 'Venda de produto', 'Outros'];
 const COLS = ['users', 'profissionais', 'servicos', 'produtos', 'agendamentos', 'compras', 'vendas', 'lancamentos'];
 const CLI_VIEWS = ['agendar', 'meus', 'perfil'];
+const FUNC_VIEWS = ['agenda', 'resumo', 'perfil'];
+const staff = () => me?.role === 'admin' || me?.role === 'func';
+const isFunc = () => me?.role === 'func';
 
 /* ---------------- utils ---------------- */
 const $ = s => document.querySelector(s);
@@ -65,7 +68,7 @@ const byId = (col, id) => S[col].find(x => x.id === id);
 /* Envia ao servidor apenas o que mudou desde a última sincronização. */
 let syncQ = Promise.resolve(), syncing = 0;
 function save() {
-  if (me?.role !== 'admin') return;
+  if (!staff()) return;
   const changes = [];
   if (JSON.stringify(S.config) !== JSON.stringify(snap.config)) changes.push({ col: 'config', op: 'put', doc: clone(S.config) });
   for (const c of COLS) {
@@ -118,7 +121,7 @@ function startPolling() {
   pollT = setInterval(poll, POLL_MS);
 }
 async function poll() {
-  if (me?.role !== 'admin' || syncing || document.hidden) return;
+  if (!staff() || syncing || document.hidden) return;
   try { if (await pull(false)) rerender(); } catch { }
 }
 document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
@@ -143,11 +146,14 @@ async function boot() {
   try { PUB = await api('GET', '/api/public'); }
   catch (e) { return /não encontrada/i.test(e.message) ? renderNaoEncontrada() : renderErro(e.message); }
   S.config = PUB.config; applyTheme();
-  if (PUB.situacao !== 'ativa') return renderSuspenso();
+  if (PUB.situacao !== 'ativa') { me = PUB.papel ? { role: PUB.papel } : null; return renderSuspenso(); }
   me = null;
   if (TOKEN) { try { const r = await api('GET', '/api/me'); me = r.user; ASSIN = r.assinatura || null; } catch { } }
   if (!me) return renderLogin();
-  if (me.role === 'admin') {
+  if (isFunc()) {
+    VER = -1; await pull(true); applyTheme(); startPolling(); garantirPush();
+    go(FUNC_VIEWS.includes(view) ? view : 'agenda');
+  } else if (me.role === 'admin') {
     VER = -1; await pull(true); applyTheme(); startPolling(); garantirPush();
     go(view && !CLI_VIEWS.includes(view) ? view : 'dashboard');
   } else {
@@ -168,13 +174,18 @@ function renderNaoEncontrada() {
   $('#app').innerHTML = telaSimples('🔎', 'Link não encontrado', `<p class="mut" style="margin-top:10px">Confira se o endereço está certo. Se você é assinante, entre pela página inicial.</p><a class="btn block" href="/entrar">Ir para o login do assinante</a>`);
 }
 function renderSuspenso(msg) {
-  const sup = PUB?.suporte;
-  const dono = me?.role === 'admin';
-  $('#app').innerHTML = telaSimples('⏸️', esc(PUB?.config?.negocio || 'Agenda'), `
-    <p style="margin-top:14px;font-weight:700">${dono ? esc(msg || 'Sua assinatura está suspensa ou vencida.') : 'A agenda online está temporariamente indisponível.'}</p>
-    <p class="mut small" style="margin-top:6px">${dono ? 'Renove para voltar a usar o sistema. Seus dados estão guardados.' : 'Entre em contato direto com o estabelecimento para marcar seu horário.'}</p>
-    ${dono && sup ? `<a class="btn block" target="_blank" rel="noopener" href="https://wa.me/${sup}?text=${encodeURIComponent('Olá! Quero renovar o acesso do ' + (PUB?.config?.negocio || 'meu negócio') + ' (link /' + SLUG + ').')}">💬 Falar com o suporte</a>` : ''}
-    ${dono ? '<button class="btn ghost block" onclick="setToken(\'\');location.reload()">Sair</button>' : '<p class="small" style="margin-top:18px"><a href="/entrar" style="color:var(--mut)">É o dono? Entrar no painel</a></p>'}`);
+  const sup = PUB?.suporte, trial = PUB?.trial;
+  const dono = me?.role === 'admin', func = me?.role === 'func';
+  const valor = 'R$ ' + Number(PUB?.valor || 49.9).toFixed(2).replace('.', ',') + '/mês';
+  const titulo = dono ? (trial ? 'Seu teste grátis terminou' : esc(msg || 'Sua assinatura está suspensa ou vencida.'))
+    : func ? 'O acesso está suspenso no momento.' : 'A agenda online está temporariamente indisponível.';
+  const texto = dono ? (trial ? `Gostou? Assine por <b>${valor}</b> e continue de onde parou: sua agenda, clientes e configurações estão guardados.` : 'Renove para voltar a usar o sistema. Seus dados estão guardados.')
+    : func ? 'Fale com o responsável pelo estabelecimento.' : 'Entre em contato direto com o estabelecimento para marcar seu horário.';
+  $('#app').innerHTML = telaSimples(trial && dono ? '🎁' : '⏸️', esc(PUB?.config?.negocio || 'Agenda'), `
+    <p style="margin-top:14px;font-weight:700">${titulo}</p>
+    <p class="mut small" style="margin-top:6px">${texto}</p>
+    ${dono && sup ? `<a class="btn block" target="_blank" rel="noopener" href="https://wa.me/${sup}?text=${encodeURIComponent((trial ? 'Olá! Meu teste grátis do AgendaPro terminou e quero assinar. ' : 'Olá! Quero renovar o acesso do AgendaPro. ') + 'Negócio: ' + (PUB?.config?.negocio || '') + ' (link /' + SLUG + ').')}">💬 ${trial ? 'Quero assinar' : 'Falar com o suporte'}</a>` : ''}
+    ${dono || func ? '<button class="btn ghost block" onclick="setToken(\'\');location.reload()">Sair</button>' : '<p class="small" style="margin-top:18px"><a href="/entrar" style="color:var(--mut)">É o dono? Entrar no painel</a></p>'}`);
 }
 
 /* ---------------- portal do assinante (página inicial) ---------------- */
@@ -184,10 +195,11 @@ function renderPortal() {
   <div class="auth"><div class="auth-card">
     <div class="brand"><div class="logo">✨</div><div><h1>AgendaPro</h1><div class="mut small">Área do assinante</div></div></div>
     <form id="f" style="margin-top:18px">
-      <label>Usuário</label><input name="login" required autocomplete="username" autocapitalize="none">
+      <label>Usuário ou e-mail</label><input name="login" required autocomplete="username" autocapitalize="none">
       <label>Senha</label><input name="senha" type="password" required autocomplete="current-password">
       <div class="err" id="err"></div>
       <button class="btn block">Entrar no meu painel</button>
+      <p class="mut small" style="margin-top:12px">Funcionários também entram por aqui, com o usuário criado pelo dono.</p>
       <p class="mut small" style="margin-top:12px">É cliente e quer agendar? Use o link que o estabelecimento enviou para você.</p>
       <p class="small" style="margin-top:8px"><a href="/" style="color:var(--mut)">Conhecer o AgendaPro</a></p>
     </form>
@@ -241,12 +253,13 @@ function renderLogin(tab = 'entrar') {
 /* ---------------- shell / navegação ---------------- */
 const NAV_ADMIN = [
   ['dashboard', '📊', 'Dashboard'], ['agenda', '📅', 'Agenda'], ['vendas', '🛍️', 'Vendas'], ['financeiro', '💰', 'Financeiro'],
-  ['estoque', '📦', 'Estoque'], ['compras', '🧾', 'Compras'], ['clientes', '👥', 'Clientes'], ['servicos', '✂️', 'Serviços'], ['config', '⚙️', 'Ajustes']
+  ['estoque', '📦', 'Estoque'], ['compras', '🧾', 'Compras'], ['clientes', '👥', 'Clientes'], ['equipe', '🧑‍💼', 'Equipe'], ['servicos', '✂️', 'Serviços'], ['config', '⚙️', 'Ajustes']
 ];
+const NAV_FUNC = [['agenda', '📅', 'Minha agenda'], ['resumo', '📈', 'Meu mês'], ['perfil', '👤', 'Perfil']];
 const NAV_CLI = [['agendar', '➕', 'Agendar'], ['meus', '📅', 'Meus horários'], ['perfil', '👤', 'Perfil']];
 
 function shell(title, actions, body) {
-  const nav = me.role === 'admin' ? NAV_ADMIN : NAV_CLI;
+  const nav = me.role === 'admin' ? NAV_ADMIN : isFunc() ? NAV_FUNC : NAV_CLI;
   const n = NICHOS[S.config.nicho] || NICHOS.barbearia;
   const bottom = me.role === 'admin' ? nav.slice(0, 4) : nav;
   const extra = me.role === 'admin' ? nav.slice(4) : [];
@@ -255,7 +268,7 @@ function shell(title, actions, body) {
     <aside class="side">
       <div class="brand"><div class="logo">${n.icon}</div><h1>${esc(S.config.negocio)}</h1></div>
       <nav class="nav">${nav.map(([k, i, l]) => `<a class="${view === k ? 'on' : ''}" onclick="go('${k}')"><span class="i">${i}</span>${l}</a>`).join('')}</nav>
-      <div class="me"><b>${esc(me.nome)}</b><div class="mut">${me.role === 'admin' ? 'Administrador' : 'Cliente'}</div><button class="btn ghost sm" style="margin-top:8px" onclick="logout()">Sair</button></div>
+      <div class="me"><b>${esc(me.nome)}</b><div class="mut">${me.role === 'admin' ? 'Administrador' : isFunc() ? 'Funcionário(a)' : 'Cliente'}</div><button class="btn ghost sm" style="margin-top:8px" onclick="logout()">Sair</button></div>
     </aside>
     <main class="main">
       ${avisoVencimento()}
@@ -272,18 +285,25 @@ function shell(title, actions, body) {
 function avisoVencimento() {
   if (me?.role !== 'admin' || !ASSIN?.vence) return '';
   const dias = Math.round((new Date(ASSIN.vence + 'T12:00') - new Date(today() + 'T12:00')) / 864e5);
+  if (ASSIN.trial) {
+    const valor = 'R$ ' + Number(ASSIN.valor || 49.9).toFixed(2).replace('.', ',');
+    const link = PUB.suporte ? `<a class="btn sm" style="background:#fff;color:#2a1640" target="_blank" rel="noopener" href="https://wa.me/${PUB.suporte}?text=${encodeURIComponent('Olá! Estou testando o AgendaPro (' + S.config.negocio + ') e quero assinar.')}">Assinar agora</a>` : '';
+    return `<div class="card" style="background:linear-gradient(120deg,#7a4fd6,#c0569a);color:#fff;border:0;margin-bottom:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <div style="flex:1;min-width:200px"><b>🎁 Teste grátis: ${dias <= 0 ? 'último dia hoje' : `faltam ${dias} dia(s)`}</b><div class="small" style="opacity:.9">Válido até ${fmtData(ASSIN.vence)}. Depois, ${valor}/mês para continuar.</div></div>${link}</div>`;
+  }
   if (dias > 5) return '';
   const sup = PUB.suporte ? ` <a style="color:#fff;text-decoration:underline" target="_blank" rel="noopener" href="https://wa.me/${PUB.suporte}?text=${encodeURIComponent('Olá! Quero renovar o acesso do ' + S.config.negocio + '.')}">Renovar agora</a>` : '';
   return `<div class="card" style="background:var(--warn);color:#1a1300;border:0;margin-bottom:14px;font-weight:700">⏳ Sua assinatura ${dias <= 0 ? 'vence hoje' : `vence em ${dias} dia(s)`} (${fmtData(ASSIN.vence)}).${sup}</div>`;
 }
 
 function go(v, keepScroll) {
-  if (me.role !== 'admin' && !CLI_VIEWS.includes(v)) v = 'agendar';
-  if (me.role === 'admin' && CLI_VIEWS.includes(v)) v = 'dashboard';
+  if (isFunc()) { if (!FUNC_VIEWS.includes(v)) v = 'agenda'; }
+  else if (me.role !== 'admin' && !CLI_VIEWS.includes(v)) v = 'agendar';
+  else if (me.role === 'admin' && CLI_VIEWS.includes(v)) v = 'dashboard';
   const mudou = v !== view;
   view = v;
   if (v === 'agendar' && mudou) ui.slots = {};
-  ({ dashboard: vDashboard, agenda: vAgenda, vendas: vVendas, financeiro: vFinanceiro, estoque: vEstoque, compras: vCompras, clientes: vClientes, servicos: vServicos, config: vConfig, agendar: vAgendar, meus: vMeus, perfil: vPerfil })[v]();
+  ({ dashboard: vDashboard, agenda: vAgenda, vendas: vVendas, financeiro: vFinanceiro, estoque: vEstoque, compras: vCompras, clientes: vClientes, equipe: vEquipe, servicos: vServicos, config: vConfig, agendar: vAgendar, meus: vMeus, perfil: isFunc() ? vPerfilFunc : vPerfil, resumo: vResumo })[v]();
   if (!keepScroll) window.scrollTo(0, 0);
 }
 
@@ -477,15 +497,15 @@ function drawChart() {
 /* ----- agenda ----- */
 function vAgenda() {
   const d = ui.agendaData;
-  const lista = S.agendamentos.filter(a => a.data === d && (!ui.agendaProf || a.profId === ui.agendaProf)).sort((a, b) => a.hora.localeCompare(b.hora));
+  const lista = S.agendamentos.filter(a => a.data === d && (isFunc() ? a.profId === me.profId : !ui.agendaProf || a.profId === ui.agendaProf)).sort((a, b) => a.hora.localeCompare(b.hora));
   const prev = lista.filter(a => a.status !== 'cancelado').reduce((s, a) => s + a.valor, 0);
-  shell('Agenda', `<button class="btn" onclick="novoAgendamento()">+ Agendamento</button>`, `
+  shell(isFunc() ? 'Minha agenda' : 'Agenda', `<button class="btn" onclick="novoAgendamento()">+ Agendamento</button>`, `
   <div class="filters">
     <button class="btn ghost sm" onclick="ui.agendaData=addDays(ui.agendaData,-1);vAgenda()">◀</button>
     <input type="date" value="${d}" onchange="ui.agendaData=this.value;vAgenda()">
     <button class="btn ghost sm" onclick="ui.agendaData=addDays(ui.agendaData,1);vAgenda()">▶</button>
     <button class="btn ghost sm" onclick="ui.agendaData=today();vAgenda()">Hoje</button>
-    ${S.profissionais.length > 1 ? `<select onchange="ui.agendaProf=this.value;vAgenda()"><option value="">Todos profissionais</option>${opts(profsAtivos(), ui.agendaProf)}</select>` : ''}
+    ${S.profissionais.length > 1 && !isFunc() ? `<select onchange="ui.agendaProf=this.value;vAgenda()"><option value="">Todos profissionais</option>${opts(profsAtivos(), ui.agendaProf)}</select>` : ''}
   </div>
   <div class="card">
     <div class="small mut" style="margin-bottom:6px">${DIAS[new Date(d + 'T12:00').getDay()]}, ${fmtData(d)} · ${lista.filter(a => a.status !== 'cancelado').length} agendamento(s) · previsto ${brl(prev)}</div>
@@ -517,7 +537,7 @@ function novoAgendamento(id) {
     <select name="clienteId" id="mCli"><option value="">— Cliente avulso (digitar nome) —</option>${opts(clientes, a?.clienteId, x => x.id, x => x.nome + (x.tel ? ' · ' + x.tel : ''))}</select>
     <div class="row" id="avulso"><div><label>Nome</label><input name="nome" value="${esc(a && !a.clienteId ? a.clienteNome : '')}"></div><div><label>Telefone</label><input name="tel" inputmode="tel" value="${esc(a && !a.clienteId ? a.tel : '')}"></div></div>
     <label>Serviço</label><select name="servicoId" id="mSv" required>${opts(servAtivos(), a?.servicoId, x => x.id, x => `${x.nome} — ${brl(x.preco)} (${x.duracao}min)`)}</select>
-    <label>Profissional</label><select name="profId" id="mPr">${opts(profsAtivos(), a?.profId)}</select>
+    <label>Profissional</label><select name="profId" id="mPr">${opts(isFunc() ? S.profissionais.filter(p => p.id === me.profId) : profsAtivos(), a?.profId || (isFunc() ? me.profId : ''))}</select>
     <div class="row"><div><label>Data</label><input type="date" name="data" id="mDt" required value="${a?.data || ui.agendaData}"></div>
       <div><label>Horário</label><select name="hora" id="mHr" required></select></div></div>
     <label>Observação</label><input name="obs" value="${esc(a?.obs || '')}">
@@ -840,14 +860,12 @@ function vConfig() {
       </div>
     </div>
     <div>
-      <div class="card"><h3>Profissionais</h3>
-        <p class="mut small">Com mais de um ativo, o cliente escolhe com quem quer ser atendido.</p>
-        <div class="list">${S.profissionais.map(p => `<div class="item"><div class="grow"><div class="t">${esc(p.nome)}</div></div>${p.ativo === false ? '<span class="pill">inativo</span>' : ''}
-          <button class="btn ghost sm" onclick="byId('profissionais','${p.id}').ativo=${p.ativo === false};save();vConfig()">${p.ativo === false ? 'Ativar' : 'Desativar'}</button></div>`).join('')}</div>
-        <button class="btn ghost sm" style="margin-top:10px" onclick="formProf()">+ Profissional</button>
+      <div class="card"><h3>Equipe</h3>
+        <p class="mut small">${S.profissionais.filter(p => p.ativo !== false).length} profissional(is) ativo(s). Cadastre funcionários e dê a cada um o próprio acesso ao app.</p>
+        <button class="btn ghost sm" style="margin-top:10px" onclick="go('equipe')">🧑‍💼 Gerenciar equipe</button>
       </div>
       <div class="card" style="margin-top:12px"><h3>Assinatura</h3>
-        <p class="small">${ASSIN?.vence ? `Válida até <b>${fmtData(ASSIN.vence)}</b>` : 'Ativa'}${PUB.suporte ? ` · <a style="color:var(--ac)" target="_blank" rel="noopener" href="https://wa.me/${PUB.suporte}">falar com o suporte</a>` : ''}</p>
+        <p class="small">${ASSIN?.vence ? `${ASSIN.trial ? 'Teste grátis' : 'Válida'} até <b>${fmtData(ASSIN.vence)}</b>` : 'Ativa'}${PUB.suporte ? ` · <a style="color:var(--ac)" target="_blank" rel="noopener" href="https://wa.me/${PUB.suporte}">falar com o suporte</a>` : ''}</p>
       </div>
       <div class="card" style="margin-top:12px"><h3>Acesso do administrador</h3>
         <button class="btn ghost sm" onclick="formSenhaAdmin()">Trocar usuário / senha</button>
@@ -948,10 +966,10 @@ async function ativarPush() {
   try {
     if (Notification.permission === 'denied') return alert('As notificações estão bloqueadas para este site.\n\nToque no cadeado ao lado do endereço → Permissões → Notificações → Permitir. Depois toque em Ativar de novo.');
     const perm = await Notification.requestPermission();
-    if (perm !== 'granted') { toast('Permissão de notificação não concedida'); return vConfig(); }
+    if (perm !== 'granted') { toast('Permissão de notificação não concedida'); return go(view, true); }
     const r = await inscreverAparelho();
     toast(`🔔 Ativado! ${r.aparelhos} aparelho(s) recebendo avisos`, 3500);
-    vConfig(); setTimeout(testarPush, 800);
+    go(view, true); setTimeout(testarPush, 800);
   } catch (e) { alert('Não foi possível ativar: ' + e.message); }
 }
 async function testarPush() {
@@ -1041,6 +1059,110 @@ function vPerfil() {
   $('#fp').onsubmit = async e => {
     e.preventDefault(); const f = Object.fromEntries(new FormData(e.target));
     try { me = (await api('PUT', '/api/me', f)).user; toast('Perfil atualizado'); } catch (err) { toast(err.message); }
+  };
+}
+
+/* ================= EQUIPE (dono) ================= */
+function vEquipe() {
+  const mes = mesAtual();
+  const acesso = id => S.users.find(u => u.role === 'func' && u.profId === id);
+  const dono = S.users.find(u => u.role === 'admin');
+  shell('Equipe', `<button class="btn" onclick="formFunc()">+ Funcionário</button>`, `
+  <p class="mut small" style="margin-bottom:12px">Cada funcionário com acesso entra pelo <b>${esc(location.host)}/entrar</b> (ou pelo seu link) com o usuário e a senha que você criar. Ele vê e cuida <b>só da própria agenda</b> e recebe notificação só dos clientes dele. Financeiro, estoque, vendas e clientes continuam só com você.</p>
+  <div class="card"><div class="list">${S.profissionais.map(p => {
+    const u = acesso(p.id), ags = S.agendamentos.filter(a => a.profId === p.id && a.data.startsWith(mes));
+    const conc = ags.filter(a => a.status === 'concluido'), fat = conc.reduce((s, a) => s + a.valor, 0);
+    const ehDono = dono && p.nome === dono.nome && !u;
+    return `<div class="item"><div class="grow"><div class="t">${esc(p.nome)} ${p.ativo === false ? '<span class="pill">inativo</span>' : ''}${ehDono ? ' <span class="pill app">você</span>' : ''}</div>
+      <div class="d">${u ? `🔑 acesso: <b style="color:var(--tx)">${esc(u.login)}</b>` : ehDono ? 'usa o seu acesso de dono' : 'sem acesso ao app'} · ${conc.length} atendimento(s) no mês · ${brl(fat)}</div></div>
+      <div class="acts"><button class="btn ghost sm" onclick="formFunc('${p.id}')">${u ? 'Editar' : ehDono ? 'Editar' : 'Dar acesso'}</button></div></div>`;
+  }).join('') || '<div class="empty">Nenhum profissional ainda.</div>'}</div></div>`);
+}
+function formFunc(profId) {
+  const p = profId ? byId('profissionais', profId) : null;
+  const u = p ? S.users.find(x => x.role === 'func' && x.profId === p.id) : null;
+  const sugestao = (p?.nome || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().split(/\s+/).slice(0, 2).join('.');
+  openModal(p ? 'Funcionário: ' + p.nome : 'Novo funcionário', `
+  <form autocomplete="off">
+    <label>Nome</label><input name="nome" required value="${esc(p?.nome || '')}" id="fNome">
+    <label>Telefone / WhatsApp <span class="mut">(opcional)</span></label><input name="tel" inputmode="tel" value="${esc(p?.tel || '')}">
+    <label style="margin-top:16px"><input type="checkbox" name="temAcesso" id="fAcc" ${u || !p ? 'checked' : ''} style="width:auto;margin-right:6px">Dar acesso ao app para este funcionário</label>
+    <div id="boxAcc">
+      <div class="row">
+        <div><label>Usuário</label><input name="login" id="fLogin" autocapitalize="none" value="${esc(u?.login || sugestao)}" placeholder="ex.: sara.lima"></div>
+        <div><label>${u ? 'Nova senha <span class="mut">(vazio = manter)</span>' : 'Senha'}</label><input name="senha" id="fSenha" autocomplete="new-password" minlength="4" placeholder="mín. 4 caracteres"></div>
+      </div>
+      <p class="mut small" style="margin-top:6px">Ele entra em <b>${esc(location.host)}/entrar</b> com esse usuário e senha.</p>
+    </div>
+    ${p ? `<label style="margin-top:14px"><input type="checkbox" name="ativo" ${p.ativo === false ? '' : 'checked'} style="width:auto;margin-right:6px">Ativo (aparece para os clientes agendarem)</label>` : ''}
+    ${u ? `<button type="button" class="btn bad sm" style="margin-top:12px" onclick="removerAcesso('${p.id}')">Remover acesso ao app</button>` : ''}
+    <div class="err" id="mErr"></div>
+    ${foot()}
+  </form>`, async f => {
+    const body = { profId: p?.id, nome: f.nome.trim(), tel: f.tel, ativo: p ? !!f.ativo : true };
+    if (f.temAcesso) {
+      body.login = f.login.trim().toLowerCase();
+      if (!body.login) { $('#mErr').textContent = 'Informe o usuário.'; return false; }
+      if (!u && !f.senha) { $('#mErr').textContent = 'Crie uma senha para o primeiro acesso.'; return false; }
+      if (f.senha) body.senha = f.senha;
+    }
+    await api('POST', '/api/equipe', body);
+    if (!f.temAcesso && u) await api('DELETE', `/api/equipe/${p.id}/acesso`);
+    await pull(true);
+    if (f.temAcesso && (f.senha || !u)) {
+      const msg = `Olá ${body.nome.split(' ')[0]}! Seu acesso ao app da ${S.config.negocio}:\n\n🔗 ${location.origin}/entrar\n👤 Usuário: ${body.login}\n🔑 Senha: ${f.senha}\n\nLá você vê a sua agenda e é avisado(a) de cada cliente novo. Ative as notificações em "Meu mês".`;
+      const tel = (f.tel || '').replace(/\D/g, '');
+      openModal('✅ Acesso pronto', `<p class="mut small">Envie para o funcionário. Anote a senha: ela não fica visível depois.</p>
+        <div class="card" style="white-space:pre-wrap;margin-top:10px;font-size:.9rem">${esc(msg)}</div>
+        <div class="modal-foot">${tel ? `<a class="btn" target="_blank" rel="noopener" href="https://wa.me/55${tel.replace(/^55(?=\d{10,11}$)/, '')}?text=${encodeURIComponent(msg)}">💬 Enviar no WhatsApp</a>` : ''}<button class="btn ghost" onclick="closeModal()">Fechar</button></div>`);
+      vEquipe(); return false;
+    }
+    toast('Equipe atualizada'); vEquipe();
+  });
+  const sync = () => $('#boxAcc').classList.toggle('hidden', !$('#fAcc').checked);
+  $('#fAcc').onchange = sync; sync();
+  if (!p) $('#fNome').oninput = () => { $('#fLogin').value = $('#fNome').value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().split(/\s+/).slice(0, 2).join('.'); };
+}
+async function removerAcesso(profId) {
+  if (!confirm('Remover o acesso deste funcionário? A agenda dele continua, só o login deixa de funcionar.')) return;
+  try { await api('DELETE', `/api/equipe/${profId}/acesso`); await pull(true); closeModal(); toast('Acesso removido'); vEquipe(); } catch (e) { toast(e.message); }
+}
+
+/* ================= FUNCIONÁRIO ================= */
+function vResumo() {
+  const mes = mesAtual(), hoje = today();
+  const meus = S.agendamentos.filter(a => a.profId === me.profId);
+  const conc = meus.filter(a => a.status === 'concluido' && a.data.startsWith(mes));
+  const hojeL = meus.filter(a => a.data === hoje && a.status !== 'cancelado');
+  const prox = meus.filter(a => a.status === 'agendado' && a.data >= hoje).sort((a, b) => (a.data + a.hora).localeCompare(b.data + b.hora)).slice(0, 8);
+  const [ic, txt] = statusPush();
+  shell(`Olá, ${esc(me.nome.split(' ')[0])}!`, '', `
+  <div class="grid kpis">
+    <div class="card kpi"><div class="l">Hoje</div><div class="v">${hojeL.length}</div><div class="s">atendimento(s) na sua agenda</div></div>
+    <div class="card kpi"><div class="l">Concluídos no mês</div><div class="v">${conc.length}</div></div>
+    <div class="card kpi"><div class="l">Faturado no mês</div><div class="v pos">${brl(conc.reduce((s, a) => s + a.valor, 0))}</div></div>
+  </div>
+  <div class="grid two" style="margin-top:12px">
+    <div class="card"><h3>Seus próximos clientes</h3>${prox.length ? `<div class="list">${prox.map(a => `<div class="item"><div class="hour">${a.hora}</div><div class="grow"><div class="t">${esc(a.clienteNome)}${tagApp(a)}</div><div class="d">${esc(a.servicoNome)} · ${a.data === hoje ? 'hoje' : fmtData(a.data)}</div></div></div>`).join('')}</div>` : '<div class="empty">Nenhum horário marcado.</div>'}</div>
+    <div class="card"><h3>🔔 Notificações</h3>
+      <p class="mut small">Receba um aviso no celular quando um cliente marcar ou cancelar com você.</p>
+      <p class="small" style="margin-top:10px">${ic} ${txt}</p>
+      <div class="acts" style="margin-top:10px">${'PushManager' in window ? `<button class="btn sm" onclick="ativarPush()">${window.Notification?.permission === 'granted' ? 'Reativar neste aparelho' : 'Ativar neste aparelho'}</button><button class="btn ghost sm" id="btnTeste" onclick="testarPush()">Enviar teste</button>` : ''}</div>
+      <p class="small" id="pushRes" style="margin-top:10px"></p>
+    </div>
+  </div>`);
+}
+function vPerfilFunc() {
+  shell('Perfil', '', `
+  <div class="card" style="max-width:480px">
+    <p class="mut small">Usuário de acesso: <b style="color:var(--tx)">${esc(me.login)}</b></p>
+    <form id="fp"><label>Nova senha</label><input type="password" name="senha" minlength="4" required autocomplete="new-password">
+      <button class="btn block">Trocar senha</button></form>
+    <button class="btn ghost block" onclick="logout()">Sair</button>
+  </div>`);
+  $('#fp').onsubmit = async e => {
+    e.preventDefault(); const f = Object.fromEntries(new FormData(e.target));
+    try { me = (await api('PUT', '/api/me', { senha: f.senha })).user; toast('Senha alterada'); e.target.reset(); } catch (err) { toast(err.message); }
   };
 }
 

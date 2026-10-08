@@ -75,10 +75,11 @@ async function carregar() {
 }
 function status(e) {
   if (e.situacao !== 'ativa') return e.situacao;
+  if (e.trial) return 'teste';
   if (e.vence && diasAte(e.vence) <= 5) return 'avencer';
   return 'ativa';
 }
-const STATUS_TXT = { ativa: 'Ativa', avencer: 'A vencer', vencida: 'Vencida', bloqueada: 'Bloqueada' };
+const STATUS_TXT = { ativa: 'Ativa', teste: 'Teste grátis', avencer: 'A vencer', vencida: 'Vencida', bloqueada: 'Bloqueada' };
 
 function render() {
   const E = DADOS.empresas;
@@ -86,21 +87,23 @@ function render() {
   const receita = ativas.reduce((s, e) => s + e.valor, 0);
   const cont = k => E.filter(e => status(e) === k).length;
   const q = ui.busca.toLowerCase();
-  const lista = E.filter(e => (ui.filtro === 'todas' || status(e) === ui.filtro) && (!q || [e.negocio, e.slug, e.login, e.dono, e.donoTel].join(' ').toLowerCase().includes(q)));
+  const lista = E.filter(e => (ui.filtro === 'todas' || status(e) === ui.filtro || (ui.filtro === 'teste' && e.trial)) && (!q || [e.negocio, e.slug, e.login, e.dono, e.donoTel, e.email].join(' ').toLowerCase().includes(q)));
+  const pagantes = ativas.filter(e => !e.trial);
   $('#app').innerHTML = `
   <main class="main" style="max-width:1100px;margin:0 auto">
-    <div class="top"><h2>🛡️ Central de Acessos</h2><div class="acts"><button class="btn" onclick="formEmpresa()">+ Novo assinante</button><button class="btn ghost" onclick="sair()">Sair</button></div></div>
+    <div class="top"><h2>🛡️ Central de Acessos</h2><div class="acts"><button class="btn ghost sino" onclick="abrirNotif()" aria-label="Notificações">🔔${DADOS.naoLidos ? `<i class="badge">${DADOS.naoLidos > 99 ? '99+' : DADOS.naoLidos}</i>` : ''}</button><button class="btn" onclick="formEmpresa()">+ Novo assinante</button><button class="btn ghost" onclick="sair()">Sair</button></div></div>
     <div class="grid kpis">
       <div class="card kpi"><div class="l">Assinantes ativos</div><div class="v pos">${ativas.length}</div><div class="s">de ${E.length} cadastrados</div></div>
-      <div class="card kpi"><div class="l">Receita mensal</div><div class="v">${brl(receita)}</div><div class="s">soma dos ativos</div></div>
+      <div class="card kpi"><div class="l">Receita mensal</div><div class="v">${brl(pagantes.reduce((s, e) => s + e.valor, 0))}</div><div class="s">${pagantes.length} pagante(s)</div></div>
+      <div class="card kpi"><div class="l">Em teste grátis</div><div class="v" style="color:#b48cff">${E.filter(e => e.trial && e.situacao === 'ativa').length}</div><div class="s">${E.filter(e => e.origem === 'site').length} vieram do site</div></div>
       <div class="card kpi"><div class="l">Vencem em 5 dias</div><div class="v" style="color:var(--warn)">${cont('avencer')}</div><div class="s">hora de cobrar</div></div>
       <div class="card kpi"><div class="l">Vencidos / bloqueados</div><div class="v neg">${cont('vencida') + cont('bloqueada')}</div><div class="s">sem acesso</div></div>
       <div class="card kpi"><div class="l">Agendamentos no mês</div><div class="v">${E.reduce((s, e) => s + e.agMes, 0)}</div><div class="s">${E.reduce((s, e) => s + e.agApp, 0)} feitos pelos clientes</div></div>
     </div>
     ${avisoBanco()}
-    ${!DADOS.suporte ? `<div class="card" style="margin-top:12px;border-color:var(--warn)"><b>Dica:</b> <span class="mut">adicione a variável <code>SUPORTE_WHATSAPP</code> no Render (ex.: 5561999999999) para os assinantes vencidos verem um botão “Falar com o suporte”.</span></div>` : ''}
+    ${!DADOS.aparelhosCentral && 'PushManager' in window ? `<div class="card" style="margin-top:12px;border-color:var(--ac);display:flex;gap:12px;align-items:center;flex-wrap:wrap"><div style="flex:1;min-width:200px"><b>🔔 Ative as notificações da Central</b><div class="mut small">Receba no celular cada teste grátis novo feito pelo site e os avisos de vencimento.</div></div><button class="btn sm" onclick="ativarPushCentral()">Ativar neste aparelho</button></div>` : ''}
     <div class="filters" style="margin-top:16px">
-      <div class="tabs-f">${['todas', 'ativa', 'avencer', 'vencida', 'bloqueada'].map(k => `<button class="${ui.filtro === k ? 'on' : ''}" onclick="ui.filtro='${k}';render()">${k === 'todas' ? 'Todas' : STATUS_TXT[k]}</button>`).join('')}</div>
+      <div class="tabs-f">${['todas', 'ativa', 'teste', 'avencer', 'vencida', 'bloqueada'].map(k => `<button class="${ui.filtro === k ? 'on' : ''}" onclick="ui.filtro='${k}';render()">${k === 'todas' ? 'Todas' : STATUS_TXT[k]}</button>`).join('')}</div>
       <input placeholder="Buscar nome, link, usuário, telefone…" value="${esc(ui.busca)}" style="flex:1;min-width:200px" oninput="ui.busca=this.value;clearTimeout(window._b);window._b=setTimeout(()=>{render();const i=document.querySelector('.filters input');i.focus();i.setSelectionRange(99,99)},250)">
     </div>
     <div class="card">${lista.length ? lista.map(e => {
@@ -109,11 +112,11 @@ function render() {
         <div class="ic" style="background:color-mix(in srgb,${n.cor} 25%,transparent)">${n.icon || '✨'}</div>
         <div style="min-width:0">
           <div class="t">${esc(e.negocio)} <span class="pill ${st}">${STATUS_TXT[st]}</span></div>
-          <div class="d">${n.label || ''} · <a href="${linkEmp(e.slug)}" target="_blank" rel="noopener">/${esc(e.slug)}</a> · usuário <b>${esc(e.login)}</b>${e.dono ? ' · ' + esc(e.dono) : ''}${e.donoTel ? ' · ' + esc(e.donoTel) : ''}<br>
-            ${e.vence ? `vence ${fmtData(e.vence)}${e.situacao === 'ativa' ? ` (${diasAte(e.vence)} dias)` : ''}` : 'sem vencimento'} · ${brl(e.valor)}/mês · ${e.clientes} clientes · ${e.agMes} agend. no mês · ${e.aparelhosPush ? `🔔 ${e.aparelhosPush} aparelho(s)` : '🔕 sem notificação'}${e.obs ? ' · ' + esc(e.obs) : ''}</div>
+          <div class="d">${n.label || ''} · <a href="${linkEmp(e.slug)}" target="_blank" rel="noopener">/${esc(e.slug)}</a> · usuário <b>${esc(e.login)}</b>${e.dono ? ' · ' + esc(e.dono) : ''}${e.donoTel ? ' · ' + esc(e.donoTel) : ''}${e.email && e.email !== e.login ? ' · ' + esc(e.email) : ''}${e.origem === 'site' ? ' · <span style="color:#b48cff">via site</span>' : ''}<br>
+            ${e.vence ? `vence ${fmtData(e.vence)}${e.situacao === 'ativa' ? ` (${diasAte(e.vence)} dias)` : ''}` : 'sem vencimento'} · ${brl(e.valor)}/mês · ${e.clientes} clientes · ${e.funcionarios ? e.funcionarios + ' funcionário(s) · ' : ''}${e.agMes} agend. no mês · ${e.aparelhosPush ? `🔔 ${e.aparelhosPush} aparelho(s)` : '🔕 sem notificação'}${e.obs ? ' · ' + esc(e.obs) : ''}</div>
         </div>
         <div class="acts">
-          <button class="btn ok sm" onclick="renovar('${e.slug}')">Renovar</button>
+          <button class="btn ok sm" onclick="renovar('${e.slug}')">${e.trial ? 'Ativar plano' : 'Renovar'}</button>
           <button class="btn ghost sm" onclick="formEmpresa('${e.slug}')">Editar</button>
           <button class="btn ghost sm" onclick="mais('${e.slug}')">⋯</button>
         </div>
@@ -148,17 +151,20 @@ function formEmpresa(slug) {
       <div><label>WhatsApp do dono</label><input name="donoTel" inputmode="tel" value="${esc(e?.donoTel || '')}" placeholder="(61) 99999-9999"></div>
     </div>
     <div class="row">
-      <div><label>Usuário (login)</label><input name="login" required autocapitalize="none" value="${esc(e?.login || '')}" pattern="[a-z0-9._@\\-]{3,60}" title="minúsculas, números, ponto, hífen" id="fLogin"></div>
+      <div><label>Usuário (login)</label><input name="login" required autocapitalize="none" value="${esc(e?.login || '')}" pattern="[a-z0-9._@+\\-]{3,80}" title="minúsculas, números, ponto, hífen" id="fLogin"></div>
       ${e ? '<div></div>' : `<div><label>Senha</label><div class="pwd"><input name="senha" required minlength="4" id="fSenha" value="${gerarSenha()}"><button type="button" class="btn ghost sm" onclick="$('#fSenha').value=gerarSenha()">🎲</button></div></div>`}
     </div>
     <div class="row">
-      <div><label>Vencimento <span class="mut">(vazio = sem vencimento)</span></label><input type="date" name="vence" value="${venc}"></div>
+      <div><label>Vencimento <span class="mut">(vazio = sem vencimento)</span></label><input type="date" name="vence" id="fVence" value="${venc}">
+        <div class="tabs-f" style="margin-top:6px"><button type="button" onclick="$('#fVence').value=addDias(DADOS.hoje,3);$('#fTrial').checked=true">Teste 3 dias</button><button type="button" onclick="$('#fVence').value=addDias(DADOS.hoje,30);$('#fTrial').checked=false">30 dias</button><button type="button" onclick="$('#fVence').value=addDias(DADOS.hoje,365);$('#fTrial').checked=false">1 ano</button></div></div>
       <div><label>Valor mensal (R$)</label><input name="valor" inputmode="decimal" value="${e ? e.valor : '49,90'}" placeholder="Ex.: 49,90"></div>
     </div>
+    <label>E-mail <span class="mut">(opcional)</span></label><input name="email" type="email" value="${esc(e?.email || '')}">
     <label>Observação</label><input name="obs" value="${esc(e?.obs || '')}" placeholder="Ex.: pago via Pix, plano anual…">
+    <label style="margin-top:12px"><input type="checkbox" name="trial" id="fTrial" ${e?.trial ? 'checked' : ''} style="width:auto;margin-right:6px">É um teste grátis (o assinante vê os dias restantes e o botão "Assinar")</label>
     ${foot(e ? 'Salvar' : 'Criar acesso')}
   </form>`, async f => {
-    const dados = { negocio: f.negocio, nicho: f.nicho, dono: f.dono, donoTel: f.donoTel, login: f.login.trim().toLowerCase(), vence: f.vence, valor: num(f.valor), obs: f.obs };
+    const dados = { negocio: f.negocio, nicho: f.nicho, dono: f.dono, donoTel: f.donoTel, login: f.login.trim().toLowerCase(), vence: f.vence, valor: num(f.valor), obs: f.obs, email: f.email, trial: !!f.trial };
     if (e) {
       await api('PUT', '/api/central/empresas/' + e.slug, { ...dados, recarregarServicos: !!f.recarregar });
       toast('Assinante atualizado'); carregar();
@@ -270,5 +276,49 @@ async function excluir(slug) {
   try { await api('DELETE', '/api/central/empresas/' + slug, { confirm: conf.trim() }); closeModal(); toast('Assinante excluído'); carregar(); }
   catch (e) { alert(e.message); }
 }
+
+/* ---------- notificações da Central ---------- */
+const ICON_EV = { teste: '🎉', vence: '⏳', venceu: '⛔' };
+function quando(iso) {
+  const d = new Date(iso), min = Math.round((Date.now() - d) / 60000);
+  if (min < 1) return 'agora'; if (min < 60) return `há ${min} min`; if (min < 1440) return `há ${Math.round(min / 60)} h`;
+  return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+}
+function statusPushCentral() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return /iPhone|iPad/.test(navigator.userAgent) ? '⚠️ No iPhone, adicione esta página à Tela de Início e abra por lá para receber notificações.' : '⚠️ Este navegador não suporta notificações. Use o Chrome.';
+  if (Notification.permission === 'denied') return '🚫 Bloqueadas neste navegador. Toque no cadeado ao lado do endereço → Notificações → Permitir.';
+  if (Notification.permission === 'granted') return `✅ Ativadas neste aparelho · ${DADOS.aparelhosCentral || 0} aparelho(s) recebendo.`;
+  return '🔕 Ainda não ativadas neste aparelho.';
+}
+async function abrirNotif() {
+  const ev = DADOS.eventos || [];
+  openModal('🔔 Notificações', `
+    <p class="small">${statusPushCentral()}</p>
+    <div class="acts" style="margin-top:8px">${'PushManager' in window ? `<button class="btn sm" onclick="ativarPushCentral()">${window.Notification?.permission === 'granted' ? 'Reativar neste aparelho' : 'Ativar neste aparelho'}</button><button class="btn ghost sm" onclick="testarPushCentral()">Enviar teste</button>` : ''}</div>
+    <p class="mut small" style="margin-top:8px">Você é avisado quando alguém cria um teste grátis pelo site, quando um assinante vence amanhã e quando vence.</p>
+    <div class="list" style="margin-top:12px">${ev.length ? ev.map(x => `<div class="item"><div style="font-size:1.3rem">${ICON_EV[x.tipo] || '•'}</div><div class="grow"><div class="t" style="font-weight:${x.em > (DADOS.lidosAte || '') ? 800 : 600}">${esc(x.titulo.replace(/^\S+\s/, ''))}</div><div class="d">${esc(x.texto)}<br>${quando(x.em)}${x.slug && DADOS.empresas.some(e => e.slug === x.slug) ? ` · <a href="#" style="color:var(--ac)" onclick="closeModal();ui.busca='${esc(x.slug)}';ui.filtro='todas';render();return false">ver assinante</a>` : ''}</div></div></div>`).join('') : '<div class="empty">Nenhuma notificação ainda.</div>'}</div>`);
+  if (DADOS.naoLidos) { try { await api('POST', '/api/central/eventos/lidos'); DADOS.naoLidos = 0; render(); } catch { } }
+}
+function b64ToU8(b64) { const s = atob((b64 + '='.repeat((4 - b64.length % 4) % 4)).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(s, c => c.charCodeAt(0)); }
+async function ativarPushCentral() {
+  try {
+    if (Notification.permission === 'denied') return alert('As notificações estão bloqueadas neste navegador. Toque no cadeado ao lado do endereço → Notificações → Permitir.');
+    if (await Notification.requestPermission() !== 'granted') return toast('Permissão não concedida');
+    const reg = await navigator.serviceWorker.register('/sw.js').then(() => navigator.serviceWorker.ready);
+    let sub = await reg.pushManager.getSubscription();
+    const chave = b64ToU8(DADOS.vapidPublic);
+    if (sub && sub.options?.applicationServerKey && new Uint8Array(sub.options.applicationServerKey).join() !== chave.join()) { await sub.unsubscribe(); sub = null; }
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: chave });
+    const ua = navigator.userAgent, aparelho = (/Android/.test(ua) ? 'Android' : /iPhone|iPad/.test(ua) ? 'iPhone' : /Windows/.test(ua) ? 'Windows' : 'Outro') + ' · Central';
+    const r = await api('POST', '/api/central/push/subscribe', { sub: sub.toJSON(), aparelho });
+    DADOS.aparelhosCentral = r.aparelhos; toast('🔔 Notificações ativadas'); closeModal(); render(); testarPushCentral();
+  } catch (e) { alert('Não foi possível ativar: ' + e.message); }
+}
+async function testarPushCentral() {
+  try { const r = await api('POST', '/api/central/push/teste'); const ok = r.resultados.filter(x => x.ok).length; toast(ok ? `Teste enviado para ${ok} aparelho(s)` : 'Nenhum aparelho ativado ainda'); }
+  catch (e) { toast(e.message); }
+}
+setInterval(() => { if (TOKEN && $('#modal').classList.contains('hidden') && !document.hidden) carregar(); }, 60000);
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => { });
 
 TOKEN ? carregar() : renderLogin();
