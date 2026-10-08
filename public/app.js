@@ -166,6 +166,8 @@ async function logout() {
   try { await api('POST', '/api/logout'); } catch { }
   setToken(''); me = null; view = ''; clearInterval(pollT); S = blank(); boot();
 }
+const empresaInfo = () => (S.config && S.config.empresa) || (PUB && PUB.empresa) || {};
+const logoBox = icon => { const l = empresaInfo().logo; return l ? `<div class="logo logo-img"><img src="${l}" alt=""></div>` : `<div class="logo">${icon}</div>`; };
 const telaSimples = (icon, titulo, html) => `<div class="auth"><div class="auth-card"><div class="brand"><div class="logo">${icon}</div><h1>${titulo}</h1></div>${html}</div></div>`;
 function renderErro(msg) {
   $('#app').innerHTML = telaSimples('⚠️', 'Sem conexão', `<p class="mut" style="margin-top:10px">${esc(msg)} Verifique sua internet.</p><button class="btn block" onclick="boot()">Tentar de novo</button>`);
@@ -222,7 +224,7 @@ function renderLogin(tab = 'entrar') {
   const c = PUB.config, n = NICHOS[c.nicho] || NICHOS.barbearia;
   $('#app').innerHTML = `
   <div class="auth"><div class="auth-card">
-    <div class="brand"><div class="logo">${n.icon}</div><div><h1>${esc(c.negocio)}</h1><div class="mut small">${n.label} · agendamento online</div></div></div>
+    <div class="brand">${logoBox(n.icon)}<div><h1>${esc(c.negocio)}</h1><div class="mut small">${n.label} · agendamento online</div></div></div>
     <div class="tabs"><button class="${tab === 'entrar' ? 'on' : ''}" onclick="renderLogin('entrar')">Entrar</button><button class="${tab === 'cad' ? 'on' : ''}" onclick="renderLogin('cad')">Criar conta</button></div>
     ${tab === 'entrar' ? `
     <form id="f">
@@ -268,7 +270,7 @@ function shell(title, actions, body) {
   $('#app').innerHTML = `
   <div class="shell">
     <aside class="side">
-      <div class="brand"><div class="logo">${n.icon}</div><h1>${esc(S.config.negocio)}</h1></div>
+      <div class="brand">${logoBox(n.icon)}<h1>${esc(S.config.negocio)}</h1></div>
       <nav class="nav">${nav.map(([k, i, l]) => `<a class="${view === k ? 'on' : ''}" onclick="go('${k}')"><span class="i">${i}</span>${l}</a>`).join('')}</nav>
       <div class="me"><b>${esc(me.nome)}</b><div class="mut">${me.role === 'admin' ? 'Administrador' : isFunc() ? 'Funcionário(a)' : 'Cliente'}</div><button class="btn ghost sm" style="margin-top:8px" onclick="logout()">Sair</button></div>
     </aside>
@@ -839,7 +841,18 @@ function vConfig() {
   const link = location.origin + '/' + SLUG;
   const convite = `Agende seu horário em ${c.negocio} pelo celular: ${link}`;
   const pushOk = 'serviceWorker' in navigator && 'PushManager' in window;
+  const emp = c.empresa || {};
+  const endTxt = enderecoTexto(emp);
   shell('Ajustes', '', `
+  <div class="card empresa-card" style="margin-bottom:12px">
+    <div class="emp-logo">${emp.logo ? `<img src="${emp.logo}" alt="Logomarca">` : `<span>${(NICHOS[c.nicho] || {}).icon || '🏢'}</span>`}</div>
+    <div class="grow" style="min-width:0">
+      <h3 style="margin:0">${esc(c.negocio)}</h3>
+      <div class="d">${[emp.razao, emp.cnpj ? 'CNPJ ' + emp.cnpj : '', emp.cpf ? 'CPF ' + emp.cpf : ''].filter(Boolean).map(esc).join(' · ') || '<span class="mut">Razão social, CNPJ e CPF não informados</span>'}</div>
+      <div class="d">${endTxt ? '📍 ' + esc(endTxt) : '<span class="mut">Endereço não informado</span>'}${emp.telefone ? ' · 📞 ' + esc(emp.telefone) : ''}</div>
+    </div>
+    <button class="btn sm" onclick="formEmpresa()">🏢 Dados da empresa</button>
+  </div>
   <div class="grid two">
     <div>
       <div class="card"><h3>Link de agendamento para clientes</h3>
@@ -853,9 +866,8 @@ function vConfig() {
         <div class="acts" style="margin-top:10px">${'PushManager' in window ? `<button class="btn sm" onclick="ativarPush()">${window.Notification?.permission === 'granted' ? 'Reativar neste aparelho' : 'Ativar neste aparelho'}</button><button class="btn ghost sm" id="btnTeste" onclick="testarPush()">Enviar teste</button>` : ''}</div>
         <p class="small" id="pushRes" style="margin-top:10px"></p>
       </div>
-      <div class="card" style="margin-top:12px"><h3>Estabelecimento</h3>
+      <div class="card" style="margin-top:12px"><h3>Horário de atendimento</h3>
         <form id="fc">
-          <label>Nome</label><input name="negocio" value="${esc(c.negocio)}" required>
           <label>Nicho</label><input value="${esc((NICHOS[c.nicho] || {}).icon + ' ' + (NICHOS[c.nicho] || {}).label)}" disabled>
           <div class="row"><div><label>Abre às</label><input type="time" name="abre" value="${c.abre}"></div><div><label>Fecha às</label><input type="time" name="fecha" value="${c.fecha}"></div></div>
           <label>Intervalo entre horários (min)</label><select name="intervalo">${[10, 15, 20, 30, 45, 60].map(m => `<option ${m == c.intervalo ? 'selected' : ''}>${m}</option>`).join('')}</select>
@@ -892,10 +904,130 @@ function vConfig() {
     const f = Object.fromEntries(new FormData(e.target));
     const dias = DIAS.map((_, i) => f['d' + i] ? i : -1).filter(i => i >= 0);
     if (!dias.length) return toast('Escolha ao menos um dia');
-    Object.assign(c, { negocio: f.negocio.trim(), abre: f.abre, fecha: f.fecha, intervalo: Number(f.intervalo), dias });
+    Object.assign(c, { abre: f.abre, fecha: f.fecha, intervalo: Number(f.intervalo), dias });
     save(); applyTheme(); toast('Ajustes salvos'); vConfig();
   };
 }
+/* ----- dados da empresa ----- */
+const soDig = v => String(v || '').replace(/\D/g, '');
+function enderecoTexto(e) {
+  if (!e) return '';
+  const l1 = [e.rua, e.numero].filter(Boolean).join(', ') + (e.complemento ? ' - ' + e.complemento : '');
+  return [l1, e.bairro, [e.cidade, e.uf].filter(Boolean).join('/'), e.cep ? 'CEP ' + e.cep : ''].filter(x => x && x.trim()).join(' · ');
+}
+function cpfValido(v) {
+  const d = soDig(v); if (d.length !== 11 || /^(\d)\1+$/.test(d)) return false;
+  for (const t of [9, 10]) { let s = 0; for (let i = 0; i < t; i++) s += +d[i] * (t + 1 - i); if (((s * 10) % 11) % 10 !== +d[t]) return false; }
+  return true;
+}
+// Aceita CNPJ numérico e o novo CNPJ alfanumérico (letras nas 12 primeiras posições).
+function cnpjValido(v) {
+  const c = String(v || '').toUpperCase().replace(/[^0-9A-Z]/g, '');
+  if (!/^[0-9A-Z]{12}\d{2}$/.test(c) || /^(\d)\1+$/.test(c)) return false;
+  const val = ch => ch.charCodeAt(0) - 48;
+  const dv = n => { const w = n === 12 ? [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2] : [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]; let s = 0; for (let i = 0; i < n; i++) s += val(c[i]) * w[i]; const r = s % 11; return r < 2 ? 0 : 11 - r; };
+  return dv(12) === +c[12] && dv(13) === +c[13];
+}
+const mascCPF = v => soDig(v).slice(0, 11).replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+const mascCNPJ = v => { const c = String(v || '').toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 14); return c.replace(/^(\w{2})(\w)/, '$1.$2').replace(/^(\w{2})\.(\w{3})(\w)/, '$1.$2.$3').replace(/\.(\w{3})(\w)/, '.$1/$2').replace(/(\w{4})(\w)/, '$1-$2'); };
+const mascCEP = v => soDig(v).slice(0, 8).replace(/(\d{5})(\d)/, '$1-$2');
+const mascTel = v => { const d = soDig(v).slice(0, 11); return d.length > 10 ? `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}` : d.length > 6 ? `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}` : d.length > 2 ? `(${d.slice(0, 2)}) ${d.slice(2)}` : d; };
+const UFS = 'AC AL AP AM BA CE DF ES GO MA MT MS MG PA PB PR PE PI RJ RN RS RO RR SC SP SE TO'.split(' ');
+
+// Reduz a imagem para 512x512 (sem cortar), para a logo ficar leve.
+function prepararLogo(file) {
+  return new Promise((ok, ko) => {
+    if (!/^image\//.test(file.type)) return ko(new Error('Escolha um arquivo de imagem (PNG, JPG ou WEBP).'));
+    if (file.size > 8e6) return ko(new Error('Imagem muito grande. Use uma de até 8 MB.'));
+    const img = new Image(), url = URL.createObjectURL(file);
+    img.onload = () => {
+      const T = 512, cv = document.createElement('canvas'); cv.width = cv.height = T;
+      const g = cv.getContext('2d'), k = Math.min(T / img.width, T / img.height), w = img.width * k, h = img.height * k;
+      g.drawImage(img, (T - w) / 2, (T - h) / 2, w, h);
+      URL.revokeObjectURL(url);
+      let d = cv.toDataURL('image/png');
+      if (d.length > 350000) { g.globalCompositeOperation = 'destination-over'; g.fillStyle = '#fff'; g.fillRect(0, 0, T, T); d = cv.toDataURL('image/jpeg', .86); }
+      ok(d);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); ko(new Error('Não foi possível ler essa imagem.')); };
+    img.src = url;
+  });
+}
+function formEmpresa() {
+  const c = S.config, e = c.empresa || {};
+  let logo = e.logo || '';
+  openModal('🏢 Dados da empresa', `
+  <form autocomplete="off">
+    <div class="logo-up">
+      <div class="emp-logo big" id="lgPrev">${logo ? `<img src="${logo}" alt="">` : '<span>🏢</span>'}</div>
+      <div style="min-width:0">
+        <b>Logomarca</b>
+        <p class="mut small">Aparece no app, na tela de agendamento dos seus clientes e no ícone do app quando instalado. PNG com fundo transparente fica melhor.</p>
+        <div class="acts" style="margin-top:8px">
+          <label class="btn sm" style="margin:0">📷 ${logo ? 'Trocar logo' : 'Enviar logo'}<input type="file" accept="image/*" id="lgFile" class="hidden"></label>
+          <button type="button" class="btn ghost sm ${logo ? '' : 'hidden'}" id="lgDel">Remover</button>
+        </div>
+      </div>
+    </div>
+    <label>Nome da empresa <span class="mut">(aparece para os clientes)</span></label><input name="negocio" required value="${esc(c.negocio)}">
+    <label>Razão social <span class="mut">(opcional)</span></label><input name="razao" value="${esc(e.razao || '')}">
+    <div class="row">
+      <div><label>CNPJ</label><input name="cnpj" id="eCnpj" value="${esc(e.cnpj || '')}" placeholder="00.000.000/0000-00" autocapitalize="characters"></div>
+      <div><label>CPF do responsável</label><input name="cpf" id="eCpf" inputmode="numeric" value="${esc(e.cpf || '')}" placeholder="000.000.000-00"></div>
+    </div>
+    <div class="row">
+      <div><label>Telefone / WhatsApp</label><input name="telefone" id="eTel" inputmode="tel" value="${esc(e.telefone || '')}"></div>
+      <div><label>E-mail</label><input name="email" type="email" value="${esc(e.email || '')}"></div>
+    </div>
+    <label>Instagram</label><input name="instagram" value="${esc(e.instagram || '')}" placeholder="@suaempresa" autocapitalize="none">
+    <h4 class="sec">Endereço</h4>
+    <div class="row">
+      <div><label>CEP</label><input name="cep" id="eCep" inputmode="numeric" value="${esc(e.cep || '')}" placeholder="00000-000"></div>
+      <div><label>Número</label><input name="numero" id="eNum" value="${esc(e.numero || '')}"></div>
+    </div>
+    <p class="mut small" id="cepMsg" style="margin-top:4px"></p>
+    <label>Rua / Avenida</label><input name="rua" id="eRua" value="${esc(e.rua || '')}">
+    <label>Complemento</label><input name="complemento" value="${esc(e.complemento || '')}" placeholder="Sala, loja, ponto de referência">
+    <label>Bairro</label><input name="bairro" id="eBairro" value="${esc(e.bairro || '')}">
+    <div class="row">
+      <div><label>Cidade</label><input name="cidade" id="eCidade" value="${esc(e.cidade || '')}"></div>
+      <div><label>UF</label><select name="uf" id="eUf"><option value=""></option>${UFS.map(u => `<option ${u === e.uf ? 'selected' : ''}>${u}</option>`).join('')}</select></div>
+    </div>
+    <label style="margin-top:12px"><input type="checkbox" name="mostrarEndereco" ${e.mostrarEndereco === false ? '' : 'checked'} style="width:auto;margin-right:6px">Mostrar endereço e telefone para os clientes na tela de agendamento</label>
+    <div class="err" id="mErr"></div>
+    ${foot()}
+  </form>`, f => {
+    if (f.cnpj && !cnpjValido(f.cnpj)) { $('#mErr').textContent = 'CNPJ inválido. Confira os números.'; return false; }
+    if (f.cpf && !cpfValido(f.cpf)) { $('#mErr').textContent = 'CPF inválido. Confira os números.'; return false; }
+    c.negocio = f.negocio.trim() || c.negocio;
+    c.empresa = {
+      logo, razao: f.razao.trim(), cnpj: f.cnpj.trim(), cpf: f.cpf.trim(), telefone: f.telefone.trim(), email: f.email.trim(),
+      instagram: f.instagram.trim(), cep: f.cep.trim(), rua: f.rua.trim(), numero: f.numero.trim(), complemento: f.complemento.trim(),
+      bairro: f.bairro.trim(), cidade: f.cidade.trim(), uf: f.uf, mostrarEndereco: !!f.mostrarEndereco
+    };
+    save(); toast('Dados da empresa salvos'); vConfig();
+  });
+  const mask = (id, fn) => { const i = $(id); i.addEventListener('input', () => { i.value = fn(i.value); }); };
+  mask('#eCpf', mascCPF); mask('#eCnpj', mascCNPJ); mask('#eCep', mascCEP); mask('#eTel', mascTel);
+  $('#eCep').addEventListener('input', async () => {
+    const cep = soDig($('#eCep').value); if (cep.length !== 8) return;
+    $('#cepMsg').textContent = 'Buscando endereço…';
+    try {
+      const r = await fetch(`https://viacep.com.br/ws/${cep}/json/`).then(r => r.json());
+      if (r.erro) throw 0;
+      $('#eRua').value = r.logradouro || $('#eRua').value; $('#eBairro').value = r.bairro || $('#eBairro').value;
+      $('#eCidade').value = r.localidade || ''; $('#eUf').value = r.uf || '';
+      $('#cepMsg').textContent = '✓ Endereço encontrado. Confira e preencha o número.'; $('#eNum').focus();
+    } catch { $('#cepMsg').textContent = 'Não encontramos esse CEP. Preencha o endereço manualmente.'; }
+  });
+  $('#lgFile').addEventListener('change', async ev => {
+    const file = ev.target.files[0]; if (!file) return;
+    try { logo = await prepararLogo(file); $('#lgPrev').innerHTML = `<img src="${logo}" alt="">`; $('#lgDel').classList.remove('hidden'); }
+    catch (err) { $('#mErr').textContent = err.message; }
+  });
+  $('#lgDel').addEventListener('click', () => { logo = ''; $('#lgPrev').innerHTML = '<span>🏢</span>'; $('#lgDel').classList.add('hidden'); });
+}
+
 function copiar() {
   const i = $('#lnk'); i.select();
   (navigator.clipboard?.writeText(i.value) || Promise.reject()).then(() => toast('Link copiado'), () => { document.execCommand('copy'); toast('Link copiado'); });
@@ -1010,6 +1142,7 @@ function vAgendar() {
   const passo = profs.length > 1 ? 1 : 0;
   shell(`Olá, ${esc(me.nome.split(' ')[0])}!`, '', `
   <p class="mut">Escolha o serviço, o dia e o horário em ${esc(S.config.negocio)}.</p>
+  ${cardLocal()}
   <div class="step"><span class="n">1</span>Serviço</div>
   <div class="svc-grid">${servAtivos().map(s => `<button class="svc ${s.id === b.servicoId ? 'on' : ''}" onclick="ui.book.servicoId='${s.id}';ui.book.hora='';vAgendar()"><b>${esc(s.nome)}</b><span class="mut small">${s.duracao} min</span><div class="p">${brl(s.preco)}</div></button>`).join('')}</div>
   ${passo ? `<div class="step"><span class="n">2</span>Profissional</div>
@@ -1019,6 +1152,16 @@ function vAgendar() {
   <div class="step"><span class="n">${3 + passo}</span>Horário</div>
   ${!sv ? '<p class="mut">Escolha um serviço para ver os horários.</p>' : !livres ? '<div class="loading">Buscando horários livres…</div>' : livres.length ? `<div class="slots">${livres.map(h => `<button class="slot ${h === b.hora ? 'on' : ''}" onclick="ui.book.hora='${h}';vAgendar()">${h}</button>`).join('')}</div>` : '<p class="mut">Sem horários livres neste dia. Tente outro.</p>'}
   ${sv && b.hora ? `<div class="card summary"><div class="item" style="padding:0"><div class="grow"><div class="t">${esc(sv.nome)} · ${brl(sv.preco)}</div><div class="d">${fmtData(b.data)} às ${b.hora}</div></div><button class="btn" id="btnConf" onclick="confirmarCliente()">Confirmar</button></div></div>` : ''}`, );
+}
+function cardLocal() {
+  const e = empresaInfo(); if (!e || e.mostrarEndereco === false) return '';
+  const end = enderecoTexto(e), tel = soDig(e.telefone);
+  if (!end && !tel && !e.instagram) return '';
+  const mapa = end ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(end.replace(/ · CEP.*/, ''))}` : '';
+  return `<div class="card local">${end ? `<div>📍 ${esc(end)}</div>` : ''}<div class="acts" style="margin-top:8px">
+    ${mapa ? `<a class="btn ghost sm" target="_blank" rel="noopener" href="${mapa}">🗺️ Como chegar</a>` : ''}
+    ${tel ? `<a class="btn ghost sm" target="_blank" rel="noopener" href="https://wa.me/55${tel.replace(/^55(?=\d{10,11}$)/, '')}">💬 WhatsApp</a>` : ''}
+    ${e.instagram ? `<a class="btn ghost sm" target="_blank" rel="noopener" href="https://instagram.com/${esc(e.instagram.replace(/^@/, ''))}">📸 ${esc(e.instagram.startsWith('@') ? e.instagram : '@' + e.instagram)}</a>` : ''}</div></div>`;
 }
 async function carregarSlots(key) {
   if (carregarSlots[key]) return; carregarSlots[key] = 1;

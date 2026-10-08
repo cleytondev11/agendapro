@@ -1,4 +1,4 @@
-const CACHE = 'agendapro-v8';
+const CACHE = 'agendapro-v9';
 const ASSETS = ['/index.html', '/app.js', '/nichos.js', '/assinar.js', '/style.css', '/icons/icon-192.png', '/icons/icon-512.png'];
 
 self.addEventListener('install', e => {

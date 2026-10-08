@@ -43,6 +43,11 @@ Na Central você:
 - Conferiu o comprovante? Central → **Ativar plano / Renovar** (o período já vem marcado: 30 ou 365 dias).
 - Os códigos Pix ficam em `public/assinar.js` (gerados a partir da sua chave, com o valor de cada plano).
 
+## Dados da empresa e logomarca
+- App do dono → **Ajustes → 🏢 Dados da empresa**: logomarca, nome, razão social, CNPJ (aceita o novo CNPJ com letras), CPF, telefone, e-mail, Instagram e endereço (o CEP preenche rua, bairro e cidade sozinho).
+- A logo aparece no menu do app, na tela de login e agendamento dos clientes, na Central e vira o ícone do app quando o cliente instala.
+- Os clientes veem endereço, botão **Como chegar**, WhatsApp e Instagram (dá para esconder). CPF e CNPJ nunca aparecem para clientes; funcionários não veem o CPF.
+
 ## Funcionários (Equipe)
 - No app do dono: **Mais → Equipe → + Funcionário** (nome, telefone, usuário e senha).
 - O funcionário entra em `/entrar`, vê **só a própria agenda**, conclui atendimentos e recebe notificação **só dos clientes dele**. Financeiro, estoque, vendas e clientes ficam só com o dono.

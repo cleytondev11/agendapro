@@ -302,6 +302,25 @@ route('POST', '/api/login-dono', null, (req, b) => {
   falhou(req.ip); fail(401, 'Usuário ou senha incorretos.');
 });
 
+/* ----- dados da empresa (logo, CNPJ, endereço) ----- */
+const CAMPOS_EMPRESA = ['razao', 'cnpj', 'cpf', 'telefone', 'email', 'instagram', 'cep', 'rua', 'numero', 'complemento', 'bairro', 'cidade', 'uf'];
+function limparEmpresa(e) {
+  if (!e || typeof e !== 'object') return {};
+  const out = {};
+  for (const k of CAMPOS_EMPRESA) out[k] = str(e[k], k === 'rua' || k === 'complemento' ? 120 : 80);
+  out.mostrarEndereco = e.mostrarEndereco !== false;
+  const logo = String(e.logo || '');
+  out.logo = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(logo) && logo.length < 600000 ? logo : '';
+  return out;
+}
+// O que o cliente pode ver (sem CPF, CNPJ e e-mail).
+function empresaPublica(E) {
+  const e = E.config.empresa || {};
+  const pub = { logo: e.logo ? `/m/${E.meta.slug}.logo?v=${e.logo.length}` : '', mostrarEndereco: e.mostrarEndereco !== false };
+  if (pub.mostrarEndereco) for (const k of ['telefone', 'instagram', 'cep', 'rua', 'numero', 'complemento', 'bairro', 'cidade', 'uf']) pub[k] = e[k] || '';
+  return pub;
+}
+
 /* ----- empresa: público ----- */
 route('GET', T + '/public', 'empresa', req => {
   const E = req.E, sit = situacao(E);
@@ -309,7 +328,7 @@ route('GET', T + '/public', 'empresa', req => {
   const ses = E.sessions[String(req.headers.authorization || '').replace(/^Bearer /, '')];
   const papel = ses && ses.exp > Date.now() ? E.users.find(u => u.id === ses.uid)?.role || '' : '';
   return {
-    papel,
+    papel, empresa: empresaPublica(E),
     configured: true, situacao: sit, suporte: SUPORTE, trial: !!E.meta.trial, valor: E.meta.valor || VALOR_PADRAO,
     config: { negocio: E.config.negocio, nicho: E.config.nicho, abre: E.config.abre, fecha: E.config.fecha, intervalo: E.config.intervalo, dias: E.config.dias, tz: E.config.tz },
     servicos: sit === 'ativa' ? E.servicos.filter(s => s.ativo !== false).map(({ id, nome, preco, duracao }) => ({ id, nome, preco, duracao })) : [],
@@ -388,8 +407,9 @@ function snapshot(E, user) {
     // Funcionário: só a própria agenda, os serviços e a lista de clientes (nome e telefone).
     const meus = E.agendamentos.filter(a => a.profId === user.profId);
     const ids = new Set(meus.map(a => a.id));
+    const { cpf, ...empresaSemCpf } = E.config.empresa || {};
     return {
-      config: E.config, servicos: E.servicos, profissionais: E.profissionais.map(({ id, nome, ativo }) => ({ id, nome, ativo })),
+      config: { ...E.config, empresa: empresaSemCpf }, servicos: E.servicos, profissionais: E.profissionais.map(({ id, nome, ativo }) => ({ id, nome, ativo })),
       users: E.users.filter(u => u.role === 'cliente').map(({ id, nome, tel, role }) => ({ id, nome, tel, role })),
       agendamentos: meus, lancamentos: E.lancamentos.filter(l => ids.has(l.ref)),
       produtos: [], compras: [], vendas: []
@@ -426,7 +446,7 @@ route('POST', T + '/sync', 'staff', (req, b) => {
   if (req.user.role === 'func') return syncFuncionario(E, req.user, Array.isArray(b.changes) ? b.changes : []);
   for (const ch of Array.isArray(b.changes) ? b.changes : []) {
     if (ch.col === 'config') {
-      if (ch.doc && typeof ch.doc === 'object') { const { nicho, ...resto } = ch.doc; E.config = { ...E.config, ...resto }; } // nicho só pela Central
+      if (ch.doc && typeof ch.doc === 'object') { const { nicho, ...resto } = ch.doc; if ('empresa' in resto) resto.empresa = limparEmpresa(resto.empresa); E.config = { ...E.config, ...resto }; } // nicho só pela Central
       continue;
     }
     if (!COLS.includes(ch.col)) continue;
@@ -556,7 +576,7 @@ function resumo(E) {
     ultimoUso: E.agendamentos.map(a => a.criadoEm || '').sort().pop()?.slice(0, 10) || '',
     aparelhosPush: E.pushSubs.length, trial: !!E.meta.trial, email: E.meta.email || '', origem: E.meta.origem || '',
     funcionarios: E.users.filter(u => u.role === 'func').length,
-    pagInformado: E.meta.pagInformado || null
+    pagInformado: E.meta.pagInformado || null, temLogo: !!E.config.empresa?.logo, cnpj: E.config.empresa?.cnpj || ''
   };
 }
 route('GET', '/api/central/empresas', 'central', () => ({
@@ -713,8 +733,11 @@ function paginaEmpresa(res, slug) {
   INDEX_HTML = INDEX_HTML || fs.readFileSync(path.join(PUBLIC, 'index.html'), 'utf8');
   const E = slug && EMP[slug];
   let html = INDEX_HTML;
-  if (E) html = html.replace('<title>AgendaPro Beleza</title>', `<title>${escHtml(E.config.negocio)} · Agendamento</title>`)
-    .replace('href="/manifest.json"', `href="/m/${slug}.webmanifest"`);
+  if (E) {
+    html = html.replace('<title>AgendaPro Beleza</title>', `<title>${escHtml(E.config.negocio)} · Agendamento</title>`)
+      .replace('href="/manifest.json"', `href="/m/${slug}.webmanifest"`);
+    if (E.config.empresa?.logo) html = html.replace(/href="\/icons\/icon-192\.png"/g, `href="/m/${slug}.logo"`);
+  }
   res.writeHead(200, { 'Content-Type': MIME['.html'], 'Cache-Control': 'no-cache' });
   res.end(html);
 }
@@ -727,8 +750,17 @@ function manifestEmpresa(res, slug) {
     name: E.config.negocio, short_name: E.config.negocio.slice(0, 12), description: 'Agende seu horário online',
     id: '/' + slug, start_url: '/' + slug, scope: '/', display: 'standalone', orientation: 'portrait',
     background_color: '#14121a', theme_color: cor, lang: 'pt-BR',
-    icons: [{ src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' }, { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' }]
+    icons: E.config.empresa?.logo
+      ? [{ src: `/m/${slug}.logo`, sizes: '512x512', type: E.config.empresa.logo.slice(5, E.config.empresa.logo.indexOf(';')), purpose: 'any' }, { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'maskable' }]
+      : [{ src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' }, { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' }]
   }));
+}
+function logoEmpresa(res, slug) {
+  const l = EMP[slug]?.config.empresa?.logo;
+  if (!l) { res.writeHead(302, { Location: '/icons/icon-192.png' }); return res.end(); }
+  const i = l.indexOf(';base64,');
+  res.writeHead(200, { 'Content-Type': l.slice(5, i), 'Cache-Control': 'public, max-age=300' });
+  res.end(Buffer.from(l.slice(i + 8), 'base64'));
 }
 function serveStatic(req, res, pathname) {
   const seg = decodeURIComponent(pathname).split('/').filter(Boolean);
@@ -739,6 +771,7 @@ function serveStatic(req, res, pathname) {
   else if (seg[0] === 'entrar' && seg.length === 1) return paginaEmpresa(res, null); // login do assinante
   else if (seg[0] === 'central' && seg.length === 1) pathname = '/central.html';
   else if (seg[0] === 'm' && seg.length === 2 && seg[1].endsWith('.webmanifest')) return manifestEmpresa(res, seg[1].replace('.webmanifest', ''));
+  else if (seg[0] === 'm' && seg.length === 2 && seg[1].endsWith('.logo')) return logoEmpresa(res, seg[1].replace('.logo', ''));
   else if (seg.length === 1 && !seg[0].includes('.')) return paginaEmpresa(res, seg[0]);
   const file = path.normalize(path.join(PUBLIC, decodeURIComponent(pathname)));
   if (!file.startsWith(PUBLIC + path.sep) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) { res.writeHead(404, { 'Content-Type': 'text/plain' }); return res.end('Não encontrado'); }
