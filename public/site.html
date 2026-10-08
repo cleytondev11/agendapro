@@ -237,7 +237,13 @@ section{padding-block:88px}
 .preco .val{font-family:var(--display);font-size:clamp(2.2rem,4vw,3rem);line-height:1}
 .preco .val small{font-family:var(--body);font-size:1rem;color:var(--mut);font-weight:600}
 .preco p{color:var(--mut);font-size:.95rem}
-.preco .btn:first-of-type{margin-top:auto}
+.preco #btnAssinar{margin-top:auto}
+.ciclo{display:inline-flex;background:var(--ink);border:1px solid var(--line);border-radius:12px;padding:4px;gap:4px;align-self:flex-start}
+.ciclo button{border:0;background:transparent;color:var(--mut);font:700 .9rem var(--body);padding:8px 14px;border-radius:9px;cursor:pointer;display:inline-flex;gap:6px;align-items:center;transition:background-color .25s,color .25s}
+.ciclo button[aria-pressed="true"]{background:var(--panel-2);color:var(--text)}
+.ciclo .off{background:linear-gradient(90deg,#f0b54a,#ee8a6c);color:#2b1406;font-size:.7rem;font-weight:800;border-radius:99px;padding:2px 7px}
+.preco .de{font-size:1rem;color:var(--mut);font-family:var(--body);font-weight:600;text-decoration:line-through;margin-right:6px}
+.preco .eco{display:inline-block;margin-top:6px;background:color-mix(in srgb,var(--ok) 18%,transparent);color:var(--ok);font-size:.82rem;font-weight:800;border-radius:99px;padding:4px 10px}
 .preco .seg{font-size:.8rem;color:var(--mut);display:flex;gap:8px;align-items:center}
 .preco .seg svg{width:16px;height:16px;color:var(--ok)}
 
@@ -629,7 +635,7 @@ footer a{color:var(--text);font-weight:700}
       <div class="sh rv">
         <div class="eyebrow">Plano</div>
         <h2 id="t-plano">Um plano com tudo incluso</h2>
-        <p>Sem cobrança por agendamento e sem limite de clientes. Você paga a mensalidade e usa o sistema inteiro.</p>
+        <p>Sem cobrança por agendamento e sem limite de clientes. Pague mês a mês ou garanta o ano inteiro com 33% de desconto.</p>
       </div>
       <div class="plano">
         <div class="inc rv">
@@ -649,11 +655,15 @@ footer a{color:var(--text);font-weight:700}
         </div>
         <div class="preco rv d1">
           <div class="eyebrow">Plano completo</div>
-          <div class="val" id="preco">Sob consulta</div>
-          <p id="precoTxt">Chame no WhatsApp e receba o valor e as condições para o seu negócio.</p>
-          <div class="seg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>Senhas criptografadas e dados separados por negócio</div>
-          <a class="btn btn-ac" href="#teste"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="8" width="18" height="13" rx="2"/><path d="M12 8v13M3 12h18M12 8S10.5 3 7.5 3a2.5 2.5 0 0 0 0 5H12Zm0 0s1.5-5 4.5-5a2.5 2.5 0 0 1 0 5H12Z"/></svg>Testar grátis por 3 dias</a>
-          <a class="btn btn-ghost" data-wa="Olá! Quero assinar o AgendaPro." href="https://wa.me/5561992522517" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2Zm0 18.2c-1.6 0-3.1-.4-4.4-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2Zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8-.2-.1-.4-.1-.6.1l-.8 1c-.1.2-.3.2-.5.1a6.7 6.7 0 0 1-3.3-2.9c-.3-.4.2-.4.7-1.4.1-.2 0-.3 0-.5l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5c-.2 0-.5.1-.7.3-.2.3-.9.9-.9 2.2s.9 2.5 1 2.7c.1.2 1.8 2.8 4.4 3.9 1.6.7 2.3.8 3.1.6.5-.1 1.5-.6 1.7-1.2.2-.6.2-1.1.2-1.2-.1-.3-.3-.3-.5-.5Z"/></svg>Assinar pelo WhatsApp</a>
+          <div class="ciclo" role="group" aria-label="Escolher período">
+            <button type="button" data-ciclo="mensal" aria-pressed="true">Mensal</button>
+            <button type="button" data-ciclo="anual" aria-pressed="false">Anual <span class="off">−33%</span></button>
+          </div>
+          <div class="val" id="preco"><small>R$</small> 49,90 <small>/mês</small></div>
+          <p id="precoTxt">Renova a cada 30 dias. Cancele quando quiser.</p>
+          <div class="seg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>Pagamento por Pix · liberação após o comprovante</div>
+          <button type="button" class="btn btn-wa" id="btnAssinar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3"/></svg>Assinar agora</button>
+          <a class="btn btn-ghost" href="#teste"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="8" width="18" height="13" rx="2"/><path d="M12 8v13M3 12h18M12 8S10.5 3 7.5 3a2.5 2.5 0 0 0 0 5H12Zm0 0s1.5-5 4.5-5a2.5 2.5 0 0 1 0 5H12Z"/></svg>Testar grátis por 3 dias</a>
         </div>
       </div>
     </div>
@@ -673,7 +683,8 @@ footer a{color:var(--text);font-weight:700}
         <details class="rv"><summary>E se dois clientes tentarem o mesmo horário?</summary><div class="a">O sistema confere na hora de confirmar. Se o horário acabou de ser ocupado, o segundo cliente é avisado e escolhe outro. Nunca fica encavalado.</div></details>
         <details class="rv"><summary>Tenho mais de um profissional. Funciona?</summary><div class="a">Funciona. Cada profissional tem a própria agenda e o cliente escolhe com quem quer ser atendido na hora de marcar.</div></details>
         <details class="rv"><summary>Meus dados ficam seguros?</summary><div class="a">As senhas são guardadas criptografadas e os dados de cada negócio ficam separados. Você também pode baixar um backup completo quando quiser.</div></details>
-        <details class="rv"><summary>Como funciona o teste grátis?</summary><div class="a">Você preenche o formulário e já entra no painel, com tudo liberado por 3 dias. Não pedimos cartão. Se quiser continuar, assina por R$ 49,90/mês e tudo o que você cadastrou continua lá. Se não assinar, o acesso fica pausado.</div></details>
+        <details class="rv"><summary>Como funciona o teste grátis?</summary><div class="a">Você preenche o formulário e já entra no painel, com tudo liberado por 3 dias. Não pedimos cartão. Se quiser continuar, assina por R$ 49,90/mês (ou R$ 399,90 no plano anual) pagando por Pix, e tudo o que você cadastrou continua lá. Se não assinar, o acesso fica pausado.</div></details>
+        <details class="rv"><summary>Como eu pago?</summary><div class="a">Por Pix. Toque em <b>Assinar agora</b>, escolha mensal (R$ 49,90) ou anual (R$ 399,90, 33% de desconto), pague pelo QR Code ou pelo código copia e cola e toque em <b>Já paguei</b> para enviar o comprovante no WhatsApp. O acesso é liberado assim que o pagamento é confirmado.</div></details>
         <details class="rv"><summary>Meus funcionários podem usar?</summary><div class="a">Sim. Você cadastra cada funcionário com usuário e senha próprios. Ele vê só a agenda dele e recebe aviso dos clientes dele. Financeiro e estoque ficam só com você.</div></details>
         <details class="rv"><summary>Como eu recebo o acesso?</summary><div class="a">Na hora, pelo teste grátis aqui no site. Se preferir, chame no WhatsApp que eu crio o acesso com você.</div></details>
       </div>
@@ -717,6 +728,7 @@ footer a{color:var(--text);font-weight:700}
   <span>Fale comigo</span>
 </a>
 
+<script src="/assinar.js"></script>
 <script>
 /* ===== Ajuste aqui ===== */
 const CONFIG = {
@@ -732,10 +744,22 @@ const reduz = matchMedia('(prefers-reduced-motion: reduce)').matches;
 document.querySelectorAll('[data-wa]').forEach(a => {
   a.href = `https://wa.me/${CONFIG.whatsapp}?text=${encodeURIComponent(a.dataset.wa)}`;
 });
-if (CONFIG.preco) {
-  $('#preco').innerHTML = `<small>R$</small> ${CONFIG.preco} <small>/mês</small>`;
-  $('#precoTxt').textContent = CONFIG.precoDetalhe + '. Fale no WhatsApp para assinar.';
+/* Plano: mensal ou anual (promoção) + pagamento por Pix */
+let ciclo = 'mensal';
+function mostraCiclo(c) {
+  ciclo = c;
+  document.querySelectorAll('[data-ciclo]').forEach(b => b.setAttribute('aria-pressed', b.dataset.ciclo === c));
+  if (c === 'anual') {
+    $('#preco').innerHTML = `<span class="de">R$ 598,80</span><small>R$</small> 399,90 <small>/ano</small>`;
+    $('#precoTxt').innerHTML = `Sai por <b>R$ 33,32/mês</b>, pago uma vez por ano.<br><span class="eco">Você economiza R$ 198,90 (33%)</span>`;
+  } else {
+    $('#preco').innerHTML = `<small>R$</small> ${CONFIG.preco || '49,90'} <small>/mês</small>`;
+    $('#precoTxt').textContent = 'Renova a cada 30 dias. Cancele quando quiser.';
+  }
 }
+document.querySelectorAll('[data-ciclo]').forEach(b => b.addEventListener('click', () => mostraCiclo(b.dataset.ciclo)));
+$('#btnAssinar').addEventListener('click', () => window.AgendaProAssinar && AgendaProAssinar.abrir({ plano: ciclo }));
+mostraCiclo('mensal');
 $('#ano').textContent = new Date().getFullYear();
 
 /* Copiar número */

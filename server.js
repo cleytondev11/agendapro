@@ -555,7 +555,8 @@ function resumo(E) {
     agApp: E.agendamentos.filter(a => (a.data || '').startsWith(mes) && a.criadoPor === 'cliente').length,
     ultimoUso: E.agendamentos.map(a => a.criadoEm || '').sort().pop()?.slice(0, 10) || '',
     aparelhosPush: E.pushSubs.length, trial: !!E.meta.trial, email: E.meta.email || '', origem: E.meta.origem || '',
-    funcionarios: E.users.filter(u => u.role === 'func').length
+    funcionarios: E.users.filter(u => u.role === 'func').length,
+    pagInformado: E.meta.pagInformado || null
   };
 }
 route('GET', '/api/central/empresas', 'central', () => ({
@@ -587,6 +588,19 @@ async function criarEmpresa(b, extraMeta = {}) {
   return E;
 }
 route('POST', '/api/central/empresas', 'central', async (req, b) => ({ empresa: resumo(await criarEmpresa(b)) }));
+
+/* ----- "já paguei": avisa a Central (o comprovante vai pelo WhatsApp) ----- */
+const avisosPg = new Map();
+route('POST', '/api/pagamento-informado', null, (req, b) => {
+  const lst = (avisosPg.get(req.ip) || []).filter(t => Date.now() - t < 36e5);
+  if (lst.length >= 5) return { ok: true };
+  avisosPg.set(req.ip, [...lst, Date.now()]);
+  const anual = b.plano === 'anual', E = EMP[str(b.slug, 60)];
+  const nome = E ? E.config.negocio : (str(b.negocio, 80) || 'Visitante do site');
+  evento('pago', `💰 Pagamento informado: ${nome}`, `Plano ${anual ? 'anual · R$ 399,90' : 'mensal · R$ 49,90'}. Confira o comprovante no WhatsApp e libere em "${E?.meta.trial ? 'Ativar plano' : 'Renovar'}" (${anual ? '365' : '30'} dias).`, E ? E.meta.slug : '');
+  if (E) { E.meta.pagInformado = { plano: anual ? 'anual' : 'mensal', em: new Date().toISOString() }; salvar(E); }
+  return { ok: true };
+});
 
 /* ----- teste grátis pelo site ----- */
 const cadastrosIp = new Map();
@@ -653,7 +667,7 @@ route('PUT', '/api/central/empresas/:slug', 'central', async (req, b, p) => {
 route('POST', '/api/central/empresas/:slug/renovar', 'central', async (req, b, p) => {
   const E = empCentral(p.slug), dias = Math.min(Math.max(parseInt(b.dias) || 30, 1), 3660);
   const base = E.meta.vence && E.meta.vence > hojeSP() ? E.meta.vence : hojeSP();
-  E.meta.vence = somaDias(base, dias); E.meta.bloqueado = false; E.meta.trial = false; E.meta.avisos = {};
+  E.meta.vence = somaDias(base, dias); E.meta.bloqueado = false; E.meta.trial = false; E.meta.avisos = {}; delete E.meta.pagInformado;
   changed(E); if (!(await gravarAgora())) fail(503, ERRO_BANCO);
   return { empresa: resumo(E) };
 });

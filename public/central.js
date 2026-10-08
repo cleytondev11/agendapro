@@ -111,7 +111,7 @@ function render() {
       return `<div class="emp">
         <div class="ic" style="background:color-mix(in srgb,${n.cor} 25%,transparent)">${n.icon || '✨'}</div>
         <div style="min-width:0">
-          <div class="t">${esc(e.negocio)} <span class="pill ${st}">${STATUS_TXT[st]}</span></div>
+          <div class="t">${esc(e.negocio)} <span class="pill ${st}">${STATUS_TXT[st]}</span>${e.pagInformado ? ` <span class="pill" style="background:color-mix(in srgb,#25d366 22%,transparent);color:#4ee38a">💰 informou Pix ${e.pagInformado.plano}</span>` : ''}</div>
           <div class="d">${n.label || ''} · <a href="${linkEmp(e.slug)}" target="_blank" rel="noopener">/${esc(e.slug)}</a> · usuário <b>${esc(e.login)}</b>${e.dono ? ' · ' + esc(e.dono) : ''}${e.donoTel ? ' · ' + esc(e.donoTel) : ''}${e.email && e.email !== e.login ? ' · ' + esc(e.email) : ''}${e.origem === 'site' ? ' · <span style="color:#b48cff">via site</span>' : ''}<br>
             ${e.vence ? `vence ${fmtData(e.vence)}${e.situacao === 'ativa' ? ` (${diasAte(e.vence)} dias)` : ''}` : 'sem vencimento'} · ${brl(e.valor)}/mês · ${e.clientes} clientes · ${e.funcionarios ? e.funcionarios + ' funcionário(s) · ' : ''}${e.agMes} agend. no mês · ${e.aparelhosPush ? `🔔 ${e.aparelhosPush} aparelho(s)` : '🔕 sem notificação'}${e.obs ? ' · ' + esc(e.obs) : ''}</div>
         </div>
@@ -224,7 +224,8 @@ function renovar(slug) {
   <form>
     <p class="mut">${esc(e.negocio)} · ${e.vence ? 'vence ' + fmtData(e.vence) : 'sem vencimento'}</p>
     <label>Adicionar</label>
-    <select name="dias"><option value="30">30 dias (mensal)</option><option value="90">90 dias (trimestral)</option><option value="180">180 dias (semestral)</option><option value="365">365 dias (anual)</option></select>
+    <select name="dias">${[[30, '30 dias (mensal · R$ 49,90)'], [90, '90 dias (trimestral)'], [180, '180 dias (semestral)'], [365, '365 dias (anual · R$ 399,90)']].map(([d, t]) => `<option value="${d}" ${e.pagInformado?.plano === 'anual' ? (d === 365 ? 'selected' : '') : (d === 30 ? 'selected' : '')}>${t}</option>`).join('')}</select>
+    ${e.pagInformado ? `<p class="small" style="margin-top:8px;color:#4ee38a">💰 Informou pagamento do plano ${e.pagInformado.plano} em ${new Date(e.pagInformado.em).toLocaleString('pt-BR')}. Confira o comprovante no WhatsApp antes de liberar.</p>` : ''}
     <p class="mut small" style="margin-top:8px">Se ainda estiver em dia, os dias são somados ao vencimento atual. Se estiver vencido ou bloqueado, conta a partir de hoje e o acesso é liberado.</p>
     ${foot('Renovar')}
   </form>`, async f => {
@@ -278,7 +279,7 @@ async function excluir(slug) {
 }
 
 /* ---------- notificações da Central ---------- */
-const ICON_EV = { teste: '🎉', vence: '⏳', venceu: '⛔' };
+const ICON_EV = { teste: '🎉', vence: '⏳', venceu: '⛔', pago: '💰' };
 function quando(iso) {
   const d = new Date(iso), min = Math.round((Date.now() - d) / 60000);
   if (min < 1) return 'agora'; if (min < 60) return `há ${min} min`; if (min < 1440) return `há ${Math.round(min / 60)} h`;
@@ -295,7 +296,7 @@ async function abrirNotif() {
   openModal('🔔 Notificações', `
     <p class="small">${statusPushCentral()}</p>
     <div class="acts" style="margin-top:8px">${'PushManager' in window ? `<button class="btn sm" onclick="ativarPushCentral()">${window.Notification?.permission === 'granted' ? 'Reativar neste aparelho' : 'Ativar neste aparelho'}</button><button class="btn ghost sm" onclick="testarPushCentral()">Enviar teste</button>` : ''}</div>
-    <p class="mut small" style="margin-top:8px">Você é avisado quando alguém cria um teste grátis pelo site, quando um assinante vence amanhã e quando vence.</p>
+    <p class="mut small" style="margin-top:8px">Você é avisado quando alguém cria um teste grátis pelo site, quando alguém informa que pagou o Pix, quando um assinante vence amanhã e quando vence.</p>
     <div class="list" style="margin-top:12px">${ev.length ? ev.map(x => `<div class="item"><div style="font-size:1.3rem">${ICON_EV[x.tipo] || '•'}</div><div class="grow"><div class="t" style="font-weight:${x.em > (DADOS.lidosAte || '') ? 800 : 600}">${esc(x.titulo.replace(/^\S+\s/, ''))}</div><div class="d">${esc(x.texto)}<br>${quando(x.em)}${x.slug && DADOS.empresas.some(e => e.slug === x.slug) ? ` · <a href="#" style="color:var(--ac)" onclick="closeModal();ui.busca='${esc(x.slug)}';ui.filtro='todas';render();return false">ver assinante</a>` : ''}</div></div></div>`).join('') : '<div class="empty">Nenhuma notificação ainda.</div>'}</div>`);
   if (DADOS.naoLidos) { try { await api('POST', '/api/central/eventos/lidos'); DADOS.naoLidos = 0; render(); } catch { } }
 }

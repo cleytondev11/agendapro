@@ -36,6 +36,13 @@ Na Central você:
 - Para liberar: Central → **Ativar plano** (+30/90/180/365 dias). O mesmo bloqueio vale para qualquer assinante com vencimento.
 - O mesmo e-mail ou WhatsApp não consegue criar outro teste.
 
+## Pagamento por Pix
+- **Assinar agora** (site, banner do teste, tela de acesso pausado e Ajustes → Assinatura) abre a tela de Pix com QR Code, código copia e cola e a chave.
+- Planos: **Mensal R$ 49,90** e **Anual R$ 399,90** (promoção: de R$ 598,80, economia de R$ 198,90 / 33%).
+- **Já paguei** abre o WhatsApp (61) 99252-2517 com a mensagem pronta para anexar o comprovante e avisa a Central (💰 "informou Pix").
+- Conferiu o comprovante? Central → **Ativar plano / Renovar** (o período já vem marcado: 30 ou 365 dias).
+- Os códigos Pix ficam em `public/assinar.js` (gerados a partir da sua chave, com o valor de cada plano).
+
 ## Funcionários (Equipe)
 - No app do dono: **Mais → Equipe → + Funcionário** (nome, telefone, usuário e senha).
 - O funcionário entra em `/entrar`, vê **só a própria agenda**, conclui atendimentos e recebe notificação **só dos clientes dele**. Financeiro, estoque, vendas e clientes ficam só com o dono.
