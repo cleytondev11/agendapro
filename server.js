@@ -25,13 +25,19 @@ const RESERVADOS = new Set(['api', 'central', 'm', 'icons', 'assets', 'static', 
 let META = { vapid: null, sessions: {} };
 const EMP = {};
 let pool;
+const INICIO = new Date().toISOString();
 
 const blankEmp = () => ({ meta: {}, config: null, users: [], profissionais: [], servicos: [], produtos: [], agendamentos: [], compras: [], vendas: [], lancamentos: [], sessions: {}, pushSubs: [], version: 1 });
 
 async function loadDB() {
   if (DB_URL) {
     const { Pool } = require('pg');
-    pool = new Pool({ connectionString: DB_URL, ssl: /localhost|127\.0\.0\.1/.test(DB_URL) ? false : { rejectUnauthorized: false } });
+    pool = new Pool({
+      connectionString: DB_URL, ssl: /localhost|127\.0\.0\.1/.test(DB_URL) ? false : { rejectUnauthorized: false },
+      max: 4, idleTimeoutMillis: 20000, connectionTimeoutMillis: 15000, keepAlive: true
+    });
+    // O Neon desliga conexões ociosas. Sem este aviso, a queda derrubava o servidor inteiro.
+    pool.on('error', e => console.warn('Conexão com o banco caiu (vai reconectar sozinho):', e.message));
     await pool.query('CREATE TABLE IF NOT EXISTS agendapro (id TEXT PRIMARY KEY, data JSONB NOT NULL)');
     const r = await pool.query('SELECT id, data FROM agendapro');
     for (const row of r.rows) {
@@ -71,30 +77,65 @@ function migrarLegado(d) {
 }
 
 const sujos = new Set();
-let writing = false;
+const ST = { gravadas: 0, ultimaGravacao: '', ultimoErro: '', ultimoErroEm: '', falhasSeguidas: 0 };
+let writing = null, retryT = null;
 function marcar(key) { sujos.add(key); }
-async function flush() {
-  if (writing) return;
-  writing = true;
-  try {
+
+async function gravar(key) {
+  const slug = key.startsWith('t:') ? key.slice(2) : null;
+  const data = key === 'meta' ? META : EMP[slug];
+  if (pool) {
+    if (data) await pool.query('INSERT INTO agendapro (id, data) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data', [key, JSON.stringify(data)]);
+    else await pool.query('DELETE FROM agendapro WHERE id = $1', [key]);
+  } else {
+    const f = key === 'meta' ? path.join(DATA_DIR, 'meta.json') : path.join(DATA_DIR, 'empresas', slug + '.json');
+    if (data) { fs.writeFileSync(f + '.tmp', JSON.stringify(data)); fs.renameSync(f + '.tmp', f); }
+    else if (fs.existsSync(f)) fs.unlinkSync(f);
+  }
+}
+
+// Grava tudo o que está pendente. Se o banco falhar, a alteração CONTINUA pendente e é tentada de novo.
+function flush() {
+  if (writing) return writing;
+  writing = (async () => {
     while (sujos.size) {
-      const key = sujos.values().next().value; sujos.delete(key);
-      const slug = key.startsWith('t:') ? key.slice(2) : null;
-      const data = key === 'meta' ? META : EMP[slug];
-      if (pool) {
-        if (data) await pool.query('INSERT INTO agendapro (id, data) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data', [key, JSON.stringify(data)]);
-        else await pool.query('DELETE FROM agendapro WHERE id = $1', [key]);
-      } else {
-        const f = key === 'meta' ? path.join(DATA_DIR, 'meta.json') : path.join(DATA_DIR, 'empresas', slug + '.json');
-        if (data) { fs.writeFileSync(f + '.tmp', JSON.stringify(data)); fs.renameSync(f + '.tmp', f); }
-        else if (fs.existsSync(f)) fs.unlinkSync(f);
+      const key = sujos.values().next().value;
+      sujos.delete(key);
+      try {
+        await gravar(key);
+        ST.gravadas++; ST.ultimaGravacao = new Date().toISOString(); ST.falhasSeguidas = 0;
+      } catch (e) {
+        sujos.add(key); // devolve para a fila: não perde nada
+        ST.ultimoErro = e.message; ST.ultimoErroEm = new Date().toISOString(); ST.falhasSeguidas++;
+        console.error(`Erro ao salvar (${key}), nova tentativa em instantes:`, e.message);
+        const espera = Math.min(8000, 500 * 2 ** Math.min(ST.falhasSeguidas, 4));
+        clearTimeout(retryT); retryT = setTimeout(flush, espera);
+        break;
       }
     }
-  } catch (e) { console.error('Erro ao salvar dados:', e); }
-  finally { writing = false; if (sujos.size) setTimeout(flush, 500); }
+  })().finally(() => { writing = null; });
+  return writing;
 }
+// Espera a gravação de verdade (usado na Central: só confirma depois que está no banco).
+async function gravarAgora(tentativas = 4) {
+  for (let i = 0; i < tentativas; i++) {
+    await flush();
+    if (!sujos.size) return true;
+    await new Promise(r => setTimeout(r, 800 * (i + 1)));
+  }
+  return !sujos.size;
+}
+setInterval(() => { if (sujos.size) flush(); }, 10000);
+// O Render avisa antes de desligar: grava o que estiver pendente.
+for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, async () => {
+  console.log('Desligando: gravando alterações pendentes…');
+  await Promise.race([gravarAgora(3), new Promise(r => setTimeout(r, 8000))]);
+  process.exit(0);
+});
+
 function changed(E) { E.version++; marcar('t:' + E.meta.slug); flush(); }
 function salvar(E) { marcar('t:' + E.meta.slug); flush(); }
+const ERRO_BANCO = 'Não foi possível salvar no banco de dados agora. Tente de novo em alguns segundos.';
 
 /* ================= utilidades ================= */
 const uid = () => Date.now().toString(36) + crypto.randomBytes(4).toString('hex');
@@ -394,9 +435,11 @@ function resumo(E) {
     aparelhosPush: E.pushSubs.length
   };
 }
-route('GET', '/api/central/empresas', 'central', () => ({ hoje: hojeSP(), suporte: SUPORTE, empresas: Object.values(EMP).map(resumo).sort((a, b) => a.negocio.localeCompare(b.negocio)) }));
+route('GET', '/api/central/empresas', 'central', () => ({
+  banco: { tipo: pool ? 'postgres' : 'arquivo', pendentes: sujos.size, ultimaGravacao: ST.ultimaGravacao, ultimoErro: sujos.size ? ST.ultimoErro : '', iniciadoEm: INICIO },
+  hoje: hojeSP(), suporte: SUPORTE, empresas: Object.values(EMP).map(resumo).sort((a, b) => a.negocio.localeCompare(b.negocio)) }));
 
-route('POST', '/api/central/empresas', 'central', (req, b) => {
+route('POST', '/api/central/empresas', 'central', async (req, b) => {
   const negocio = str(b.negocio, 80), nicho = str(b.nicho, 30), login = str(b.login, 60).toLowerCase();
   if (!negocio) fail(400, 'Informe o nome do negócio.');
   if (!NICHOS[nicho]) fail(400, 'Escolha o nicho.');
@@ -415,11 +458,12 @@ route('POST', '/api/central/empresas', 'central', (req, b) => {
   E.servicos = N.servicos.map(([nome, preco, duracao]) => ({ id: uid(), nome, preco, duracao, ativo: true }));
   E.produtos = N.produtos.map(([nome, custo, preco, qtd]) => ({ id: uid(), nome, custo, preco, qtd, min: Math.max(2, Math.round(qtd / 3)) }));
   EMP[slug] = E; changed(E);
+  if (!(await gravarAgora())) { delete EMP[slug]; sujos.delete('t:' + slug); fail(503, ERRO_BANCO); }
   return { empresa: resumo(E) };
 });
 
 const empCentral = slug => EMP[slug] || fail(404, 'Empresa não encontrada.');
-route('PUT', '/api/central/empresas/:slug', 'central', (req, b, p) => {
+route('PUT', '/api/central/empresas/:slug', 'central', async (req, b, p) => {
   const E = empCentral(p.slug);
   if (b.negocio !== undefined && str(b.negocio)) E.config.negocio = str(b.negocio, 80);
   if (b.nicho !== undefined) {
@@ -440,25 +484,29 @@ route('PUT', '/api/central/empresas/:slug', 'central', (req, b, p) => {
     if (loginEmUso(login, E.meta.slug, dono.id)) fail(409, 'Esse usuário já está em uso por outro assinante.');
     dono.login = login;
   }
-  changed(E); return { empresa: resumo(E) };
+  changed(E); if (!(await gravarAgora())) fail(503, ERRO_BANCO);
+  return { empresa: resumo(E) };
 });
-route('POST', '/api/central/empresas/:slug/renovar', 'central', (req, b, p) => {
+route('POST', '/api/central/empresas/:slug/renovar', 'central', async (req, b, p) => {
   const E = empCentral(p.slug), dias = Math.min(Math.max(parseInt(b.dias) || 30, 1), 3660);
   const base = E.meta.vence && E.meta.vence > hojeSP() ? E.meta.vence : hojeSP();
   E.meta.vence = somaDias(base, dias); E.meta.bloqueado = false;
-  changed(E); return { empresa: resumo(E) };
+  changed(E); if (!(await gravarAgora())) fail(503, ERRO_BANCO);
+  return { empresa: resumo(E) };
 });
-route('POST', '/api/central/empresas/:slug/senha', 'central', (req, b, p) => {
+route('POST', '/api/central/empresas/:slug/senha', 'central', async (req, b, p) => {
   const E = empCentral(p.slug), dono = E.users.find(u => u.role === 'admin');
   if (String(b.senha || '').length < 4) fail(400, 'Senha: mínimo 4 caracteres.');
   dono.senha = hashPw(b.senha);
   for (const [k, s] of Object.entries(E.sessions)) if (s.uid === dono.id) delete E.sessions[k];
-  changed(E); return { ok: true };
+  changed(E); if (!(await gravarAgora())) fail(503, ERRO_BANCO);
+  return { ok: true };
 });
-route('DELETE', '/api/central/empresas/:slug', 'central', (req, b, p) => {
+route('DELETE', '/api/central/empresas/:slug', 'central', async (req, b, p) => {
   const E = empCentral(p.slug);
   if (b.confirm !== E.meta.slug) fail(400, 'Digite o link da empresa para confirmar.');
-  delete EMP[p.slug]; marcar('t:' + p.slug); flush();
+  delete EMP[p.slug]; marcar('t:' + p.slug);
+  if (!(await gravarAgora())) fail(503, ERRO_BANCO);
   return { ok: true };
 });
 route('GET', '/api/central/empresas/:slug/backup', 'central', (req, b, p) => {
