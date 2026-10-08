@@ -1,36 +1,17 @@
-/* AgendaPro Beleza — PWA de gestão para barbearia, lash, manicure/pedicure e salão.
-   Dados salvos no próprio aparelho (localStorage). Para uso com vários aparelhos
-   ao mesmo tempo, troque as funções load()/save() por chamadas à sua API. */
+/* AgendaPro Beleza — app (PWA) conectado ao servidor.
+   Clientes agendam do próprio celular; o painel do dono recebe na hora. */
 
-const DB_KEY = 'agendapro_db_v1';
-const SESS_KEY = 'agendapro_sess_v1';
+// Link da empresa: agendapro.com/nome-do-negocio  →  SLUG = 'nome-do-negocio'
+const SLUG = (s => s === 'entrar' ? '' : s)(decodeURIComponent(location.pathname.split('/')[1] || '').toLowerCase());
+const TOK_KEY = 'agendapro_token_' + SLUG;
+const POLL_MS = 15000;
 
-const NICHOS = {
-  barbearia: {
-    label: 'Barbearia', icon: '💈', cor: '#c8a24a',
-    servicos: [['Corte masculino', 40, 30], ['Barba', 30, 20], ['Corte + barba', 60, 50], ['Pezinho', 15, 10], ['Sobrancelha', 15, 10], ['Pigmentação', 35, 30]],
-    produtos: [['Pomada modeladora', 18, 45, 10], ['Óleo para barba', 15, 40, 8], ['Shampoo anticaspa', 12, 35, 6], ['Lâmina descartável (cx)', 25, 0, 5]]
-  },
-  lash: {
-    label: 'Lash / Cílios', icon: '👁️', cor: '#d9668f',
-    servicos: [['Fio a fio', 130, 120], ['Volume brasileiro', 150, 120], ['Volume russo', 180, 150], ['Manutenção', 80, 60], ['Remoção', 40, 30], ['Lash lifting', 100, 60]],
-    produtos: [['Cola para extensão', 60, 0, 3], ['Fios 0.07 (caixa)', 35, 0, 5], ['Removedor em gel', 25, 0, 2], ['Escovinhas (pct)', 8, 15, 10]]
-  },
-  manicure: {
-    label: 'Manicure & Pedicure', icon: '💅', cor: '#e0607e',
-    servicos: [['Manicure', 30, 40], ['Pedicure', 35, 45], ['Pé e mão', 60, 80], ['Esmaltação em gel', 70, 60], ['Alongamento em gel', 150, 120], ['Spa dos pés', 50, 40]],
-    produtos: [['Esmalte (un)', 6, 15, 20], ['Acetona 500ml', 9, 0, 4], ['Lixa (pct)', 10, 0, 5], ['Gel construtor', 45, 0, 2]]
-  },
-  cabeleireira: {
-    label: 'Salão / Cabeleireira', icon: '💇‍♀️', cor: '#9a72e0',
-    servicos: [['Corte feminino', 70, 60], ['Escova', 50, 45], ['Hidratação', 80, 60], ['Coloração', 150, 120], ['Luzes / Mechas', 300, 240], ['Progressiva', 250, 180]],
-    produtos: [['Shampoo profissional', 40, 75, 4], ['Máscara de hidratação', 55, 95, 4], ['Tinta (tubo)', 18, 0, 10], ['Água oxigenada', 14, 0, 4]]
-  }
-};
 const DIAS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 const PAGTOS = ['Pix', 'Dinheiro', 'Cartão de débito', 'Cartão de crédito'];
 const CAT_SAIDA = ['Aluguel', 'Energia/Água', 'Internet', 'Salários/Comissões', 'Compra de produtos', 'Manutenção', 'Marketing', 'Impostos', 'Outros'];
 const CAT_ENTRADA = ['Serviço', 'Venda de produto', 'Outros'];
+const COLS = ['users', 'profissionais', 'servicos', 'produtos', 'agendamentos', 'compras', 'vendas', 'lancamentos'];
+const CLI_VIEWS = ['agendar', 'meus', 'perfil'];
 
 /* ---------------- utils ---------------- */
 const $ = s => document.querySelector(s);
@@ -46,146 +27,214 @@ const toMin = h => { const [a, b] = h.split(':').map(Number); return a * 60 + b;
 const toHora = m => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
 const mesAtual = () => today().slice(0, 7);
 const num = v => parseFloat(String(v).replace(',', '.')) || 0;
+const clone = o => JSON.parse(JSON.stringify(o));
 
-async function hash(txt) {
-  const data = new TextEncoder().encode('agendapro:' + txt);
-  if (window.crypto && crypto.subtle) {
-    const buf = await crypto.subtle.digest('SHA-256', data);
-    return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
-  }
-  let h = 5381; for (const b of data) h = ((h << 5) + h + b) | 0; return 'x' + (h >>> 0).toString(16);
-}
-
-function toast(msg) {
+function toast(msg, ms = 2400) {
   const t = $('#toast'); t.textContent = msg; t.classList.add('show');
-  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), 2200);
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), ms);
 }
 
-/* ---------------- dados ---------------- */
-let S = load();
-let me = null;
-let view = '';
-const ui = { agendaData: today(), agendaProf: '', finMes: mesAtual(), busca: '', book: {} };
+/* ---------------- servidor ---------------- */
+let TOKEN = localStorage.getItem(TOK_KEY) || '';
+async function api(method, url, body) {
+  let r;
+  try {
+    r = await fetch(url.startsWith('/api/login-dono') ? url : url.replace(/^\/api\//, `/api/t/${encodeURIComponent(SLUG)}/`), { method, headers: { 'Content-Type': 'application/json', ...(TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {}) }, body: body ? JSON.stringify(body) : undefined });
+  } catch { setOffline(true); throw new Error('Sem conexão com o servidor.'); }
+  setOffline(false);
+  let j = null; try { j = await r.json(); } catch { }
+  if (r.status === 401 && TOKEN && !url.startsWith('/api/login')) { setToken(''); me = null; boot(); throw new Error(j?.erro || 'Sessão expirada.'); }
+  if (r.status === 423) { clearInterval(pollT); renderSuspenso(j?.erro); throw new Error(j?.erro || 'Acesso suspenso.'); }
+  if (!r.ok) throw new Error(j?.erro || 'Erro no servidor.');
+  return j;
+}
+function setToken(t) { TOKEN = t; t ? localStorage.setItem(TOK_KEY, t) : localStorage.removeItem(TOK_KEY); }
+function setOffline(on) {
+  let b = $('#offline');
+  if (on && !b) { b = document.createElement('div'); b.id = 'offline'; b.className = 'offline'; b.textContent = 'Sem conexão — tentando reconectar…'; document.body.appendChild(b); }
+  if (!on && b) b.remove();
+}
 
-function blank() {
-  return { config: null, users: [], profissionais: [], servicos: [], produtos: [], agendamentos: [], compras: [], vendas: [], lancamentos: [] };
-}
-function load() {
-  try { return Object.assign(blank(), JSON.parse(localStorage.getItem(DB_KEY)) || {}); } catch { return blank(); }
-}
-function save() { localStorage.setItem(DB_KEY, JSON.stringify(S)); }
+/* ---------------- estado ---------------- */
+const blank = () => ({ config: null, users: [], profissionais: [], servicos: [], produtos: [], agendamentos: [], compras: [], vendas: [], lancamentos: [] });
+let S = blank(), snap = blank(), VER = -1, PUB = null;
+let me = null, view = '', ASSIN = null;
+const ui = { agendaData: today(), agendaProf: '', finMes: mesAtual(), busca: '', book: {}, slots: {}, novos: new Set() };
 const byId = (col, id) => S[col].find(x => x.id === id);
+
+/* Envia ao servidor apenas o que mudou desde a última sincronização. */
+let syncQ = Promise.resolve(), syncing = 0;
+function save() {
+  if (me?.role !== 'admin') return;
+  const changes = [];
+  if (JSON.stringify(S.config) !== JSON.stringify(snap.config)) changes.push({ col: 'config', op: 'put', doc: clone(S.config) });
+  for (const c of COLS) {
+    const old = new Map(snap[c].map(d => [d.id, JSON.stringify(d)]));
+    const cur = new Set();
+    for (const d of S[c]) { cur.add(d.id); const j = JSON.stringify(d); if (old.get(d.id) !== j) changes.push({ col: c, op: 'put', doc: JSON.parse(j) }); }
+    for (const id of old.keys()) if (!cur.has(id)) changes.push({ col: c, op: 'del', id });
+  }
+  S.users.forEach(u => { if (u.novaSenha) { delete u.novaSenha; u.hasSenha = true; } });
+  snap = clone(S);
+  if (!changes.length) return;
+  syncing++;
+  syncQ = syncQ.then(() => api('POST', '/api/sync', { changes }))
+    .then(r => { if (r.v === VER + 1) VER = r.v; })
+    .catch(e => { toast('Não salvou: ' + e.message, 4000); pull(true).then(() => rerender()); })
+    .finally(() => syncing--);
+}
+
+async function pull(force) {
+  const r = await api('GET', '/api/db?v=' + (force ? -1 : VER));
+  if (r.same) return false;
+  const primeira = VER === -1;
+  const antes = new Map(S.agendamentos.map(a => [a.id, a.status]));
+  S = Object.assign(blank(), r.data); snap = clone(S); VER = r.v;
+  if (!primeira) avisarNovidades(antes);
+  return true;
+}
+
+function avisarNovidades(antes) {
+  const novos = S.agendamentos.filter(a => a.criadoPor === 'cliente' && !antes.has(a.id));
+  const cancel = S.agendamentos.filter(a => a.canceladoPor === 'cliente' && a.status === 'cancelado' && antes.get(a.id) === 'agendado');
+  if (!novos.length && !cancel.length) return;
+  novos.forEach(a => ui.novos.add(a.id));
+  const msg = novos.length
+    ? `📅 Novo agendamento: ${novos[0].clienteNome} — ${fmtData(novos[0].data)} às ${novos[0].hora}${novos.length > 1 ? ` (+${novos.length - 1})` : ''}`
+    : `❌ ${cancel[0].clienteNome} cancelou ${fmtData(cancel[0].data)} às ${cancel[0].hora}`;
+  toast(msg, 6000); beep(); navigator.vibrate?.(200);
+  if (document.hidden && window.Notification?.permission === 'granted') navigator.serviceWorker?.ready.then(r => r.showNotification('AgendaPro', { body: msg, icon: 'icons/icon-192.png' }));
+}
+function beep() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    [880, 1320].forEach((f, i) => { const o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.value = f; o.connect(g); g.connect(ctx.destination); g.gain.setValueAtTime(.15, ctx.currentTime + i * .18); g.gain.exponentialRampToValueAtTime(.001, ctx.currentTime + i * .18 + .16); o.start(ctx.currentTime + i * .18); o.stop(ctx.currentTime + i * .18 + .17); });
+  } catch { }
+}
+
+let pollT = null;
+function startPolling() {
+  clearInterval(pollT);
+  pollT = setInterval(poll, POLL_MS);
+}
+async function poll() {
+  if (me?.role !== 'admin' || syncing || document.hidden) return;
+  try { if (await pull(false)) rerender(); } catch { }
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
+window.addEventListener('online', poll);
+let renderPendente = false;
+function rerender() {
+  if (!$('#modal').classList.contains('hidden')) { renderPendente = true; return; }
+  if (view) go(view, true);
+}
 
 function applyTheme() {
   const cor = S.config ? (NICHOS[S.config.nicho]?.cor || '#d9668f') : '#d9668f';
   document.documentElement.style.setProperty('--ac', cor);
 }
-
-function seedNicho(nicho) {
-  const n = NICHOS[nicho];
-  S.servicos = n.servicos.map(([nome, preco, duracao]) => ({ id: uid(), nome, preco, duracao, ativo: true }));
-  if (!S.produtos.length) S.produtos = n.produtos.map(([nome, custo, preco, qtd]) => ({ id: uid(), nome, custo, preco, qtd, min: Math.max(2, Math.round(qtd / 3)) }));
-}
-
 function lancar(tipo, descricao, valor, categoria, data = today(), ref = '', pagamento = '') {
   S.lancamentos.push({ id: uid(), tipo, descricao, valor: num(valor), categoria, data, ref, pagamento });
 }
 
 /* ---------------- sessão ---------------- */
-function boot() {
-  applyTheme();
-  const sid = localStorage.getItem(SESS_KEY);
-  me = sid ? byId('users', sid) : null;
-  if (!S.config || !S.users.some(u => u.role === 'admin')) return renderSetup();
+async function boot() {
+  if (!SLUG) return renderPortal();
+  try { PUB = await api('GET', '/api/public'); }
+  catch (e) { return /não encontrada/i.test(e.message) ? renderNaoEncontrada() : renderErro(e.message); }
+  S.config = PUB.config; applyTheme();
+  if (PUB.situacao !== 'ativa') return renderSuspenso();
+  me = null;
+  if (TOKEN) { try { const r = await api('GET', '/api/me'); me = r.user; ASSIN = r.assinatura || null; } catch { } }
   if (!me) return renderLogin();
-  go(me.role === 'admin' ? (view && view !== 'agendar' && view !== 'meus' ? view : 'dashboard') : 'agendar');
+  if (me.role === 'admin') {
+    VER = -1; await pull(true); applyTheme(); startPolling(); garantirPush();
+    go(view && !CLI_VIEWS.includes(view) ? view : 'dashboard');
+  } else {
+    clearInterval(pollT);
+    S.servicos = PUB.servicos; S.profissionais = PUB.profissionais;
+    go(CLI_VIEWS.includes(view) ? view : 'agendar');
+  }
 }
-function logout() { localStorage.removeItem(SESS_KEY); me = null; view = ''; renderLogin(); }
+async function logout() {
+  try { await api('POST', '/api/logout'); } catch { }
+  setToken(''); me = null; view = ''; clearInterval(pollT); S = blank(); boot();
+}
+const telaSimples = (icon, titulo, html) => `<div class="auth"><div class="auth-card"><div class="brand"><div class="logo">${icon}</div><h1>${titulo}</h1></div>${html}</div></div>`;
+function renderErro(msg) {
+  $('#app').innerHTML = telaSimples('⚠️', 'Sem conexão', `<p class="mut" style="margin-top:10px">${esc(msg)} Verifique sua internet.</p><button class="btn block" onclick="boot()">Tentar de novo</button>`);
+}
+function renderNaoEncontrada() {
+  $('#app').innerHTML = telaSimples('🔎', 'Link não encontrado', `<p class="mut" style="margin-top:10px">Confira se o endereço está certo. Se você é assinante, entre pela página inicial.</p><a class="btn block" href="/entrar">Ir para o login do assinante</a>`);
+}
+function renderSuspenso(msg) {
+  const sup = PUB?.suporte;
+  const dono = me?.role === 'admin';
+  $('#app').innerHTML = telaSimples('⏸️', esc(PUB?.config?.negocio || 'Agenda'), `
+    <p style="margin-top:14px;font-weight:700">${dono ? esc(msg || 'Sua assinatura está suspensa ou vencida.') : 'A agenda online está temporariamente indisponível.'}</p>
+    <p class="mut small" style="margin-top:6px">${dono ? 'Renove para voltar a usar o sistema. Seus dados estão guardados.' : 'Entre em contato direto com o estabelecimento para marcar seu horário.'}</p>
+    ${dono && sup ? `<a class="btn block" target="_blank" rel="noopener" href="https://wa.me/${sup}?text=${encodeURIComponent('Olá! Quero renovar o acesso do ' + (PUB?.config?.negocio || 'meu negócio') + ' (link /' + SLUG + ').')}">💬 Falar com o suporte</a>` : ''}
+    ${dono ? '<button class="btn ghost block" onclick="setToken(\'\');location.reload()">Sair</button>' : '<p class="small" style="margin-top:18px"><a href="/entrar" style="color:var(--mut)">É o dono? Entrar no painel</a></p>'}`);
+}
 
-/* ---------------- primeira configuração ---------------- */
-function renderSetup() {
-  let nicho = 'barbearia';
+/* ---------------- portal do assinante (página inicial) ---------------- */
+function renderPortal() {
+  document.title = 'AgendaPro · Área do assinante';
   $('#app').innerHTML = `
-  <div class="auth"><div class="auth-card" style="max-width:460px">
-    <div class="brand"><div class="logo">✨</div><h1>AgendaPro</h1></div>
-    <p class="mut small">Primeiro acesso: configure seu negócio e crie o login do administrador.</p>
-    <label>Qual é o seu nicho?</label>
-    <div class="nichos" id="nichos">${Object.entries(NICHOS).map(([k, n]) => `
-      <button type="button" class="nicho ${k === nicho ? 'on' : ''}" data-k="${k}"><span>${n.icon}</span><b>${n.label}</b></button>`).join('')}</div>
-    <form id="f">
-      <label>Nome do estabelecimento</label><input name="negocio" required placeholder="Ex.: Studio Bella">
-      <label>Seu nome</label><input name="nome" required>
-      <div class="row">
-        <div><label>Usuário (login)</label><input name="login" required autocomplete="username" autocapitalize="none"></div>
-        <div><label>Senha</label><input name="senha" type="password" required minlength="4" autocomplete="new-password"></div>
-      </div>
+  <div class="auth"><div class="auth-card">
+    <div class="brand"><div class="logo">✨</div><div><h1>AgendaPro</h1><div class="mut small">Área do assinante</div></div></div>
+    <form id="f" style="margin-top:18px">
+      <label>Usuário</label><input name="login" required autocomplete="username" autocapitalize="none">
+      <label>Senha</label><input name="senha" type="password" required autocomplete="current-password">
       <div class="err" id="err"></div>
-      <button class="btn block">Criar e entrar</button>
+      <button class="btn block">Entrar no meu painel</button>
+      <p class="mut small" style="margin-top:12px">É cliente e quer agendar? Use o link que o estabelecimento enviou para você.</p>
+      <p class="small" style="margin-top:8px"><a href="/" style="color:var(--mut)">Conhecer o AgendaPro</a></p>
     </form>
   </div></div>`;
-  $('#nichos').onclick = e => {
-    const b = e.target.closest('.nicho'); if (!b) return;
-    nicho = b.dataset.k;
-    document.querySelectorAll('.nicho').forEach(x => x.classList.toggle('on', x === b));
-    document.documentElement.style.setProperty('--ac', NICHOS[nicho].cor);
-  };
-  document.documentElement.style.setProperty('--ac', NICHOS[nicho].cor);
   $('#f').onsubmit = async e => {
     e.preventDefault();
-    const f = Object.fromEntries(new FormData(e.target));
-    S = blank();
-    S.config = { negocio: f.negocio.trim(), nicho, abre: '09:00', fecha: '19:00', intervalo: 30, dias: [1, 2, 3, 4, 5, 6] };
-    const admin = { id: uid(), nome: f.nome.trim(), login: f.login.trim().toLowerCase(), senha: await hash(f.senha), role: 'admin', tel: '', criado: today() };
-    S.users.push(admin);
-    S.profissionais.push({ id: uid(), nome: f.nome.trim(), ativo: true });
-    seedNicho(nicho);
-    save(); localStorage.setItem(SESS_KEY, admin.id); boot();
+    const f = Object.fromEntries(new FormData(e.target)), btn = e.target.querySelector('.btn'); btn.disabled = true;
+    try {
+      const r = await api('POST', '/api/login-dono', f);
+      localStorage.setItem('agendapro_token_' + r.slug, r.token);
+      location.href = '/' + r.slug;
+    } catch (err) { $('#err').textContent = err.message; btn.disabled = false; }
   };
 }
 
 /* ---------------- login / cadastro de cliente ---------------- */
 function renderLogin(tab = 'entrar') {
-  const c = S.config, n = NICHOS[c.nicho];
+  const c = PUB.config, n = NICHOS[c.nicho] || NICHOS.barbearia;
   $('#app').innerHTML = `
   <div class="auth"><div class="auth-card">
-    <div class="brand"><div class="logo">${n.icon}</div><div><h1>${esc(c.negocio)}</h1><div class="mut small">${n.label}</div></div></div>
-    <div class="tabs"><button class="${tab === 'entrar' ? 'on' : ''}" onclick="renderLogin('entrar')">Entrar</button><button class="${tab === 'cad' ? 'on' : ''}" onclick="renderLogin('cad')">Sou cliente novo</button></div>
+    <div class="brand"><div class="logo">${n.icon}</div><div><h1>${esc(c.negocio)}</h1><div class="mut small">${n.label} · agendamento online</div></div></div>
+    <div class="tabs"><button class="${tab === 'entrar' ? 'on' : ''}" onclick="renderLogin('entrar')">Entrar</button><button class="${tab === 'cad' ? 'on' : ''}" onclick="renderLogin('cad')">Criar conta</button></div>
     ${tab === 'entrar' ? `
     <form id="f">
-      <label>Usuário ou telefone</label><input name="login" required autocomplete="username" autocapitalize="none">
+      <label>Telefone (ou usuário)</label><input name="login" required autocomplete="username" autocapitalize="none" inputmode="text">
       <label>Senha</label><input name="senha" type="password" required autocomplete="current-password">
       <div class="err" id="err"></div>
       <button class="btn block">Entrar</button>
+      <p class="mut small" style="margin-top:12px">Primeira vez? Toque em <b>Criar conta</b> para agendar seu horário.</p>
     </form>` : `
     <form id="f">
-      <label>Nome completo</label><input name="nome" required>
-      <label>Telefone / WhatsApp</label><input name="tel" required inputmode="tel" placeholder="(61) 90000-0000">
+      <label>Nome completo</label><input name="nome" required autocomplete="name">
+      <label>Telefone / WhatsApp</label><input name="tel" required inputmode="tel" autocomplete="tel" placeholder="(61) 90000-0000">
       <label>Crie uma senha</label><input name="senha" type="password" required minlength="4" autocomplete="new-password">
       <div class="err" id="err"></div>
       <button class="btn block">Criar conta e agendar</button>
-      <p class="mut small" style="margin-top:10px">Seu login será o seu telefone (só números).</p>
+      <p class="mut small" style="margin-top:10px">Nas próximas vezes, entre com seu telefone e essa senha.</p>
     </form>`}
   </div></div>`;
   $('#f').onsubmit = async e => {
     e.preventDefault();
-    const f = Object.fromEntries(new FormData(e.target));
-    if (tab === 'entrar') {
-      const login = f.login.trim().toLowerCase(), loginTel = login.replace(/\D/g, '');
-      const h = await hash(f.senha);
-      const u = S.users.find(u => (u.login === login || (loginTel && u.login === loginTel)) && u.senha === h);
-      if (!u) return $('#err').textContent = 'Usuário ou senha incorretos.';
-      if (u.bloqueado) return $('#err').textContent = 'Acesso bloqueado. Fale com o estabelecimento.';
-      localStorage.setItem(SESS_KEY, u.id); boot();
-    } else {
-      const tel = f.tel.replace(/\D/g, '');
-      if (tel.length < 10) return $('#err').textContent = 'Informe um telefone com DDD.';
-      const ex = S.users.find(u => u.login === tel);
-      if (ex && ex.senha) return $('#err').textContent = 'Já existe uma conta com esse telefone. Use a aba Entrar.';
-      let u = ex;
-      if (u) { u.senha = await hash(f.senha); u.nome = f.nome.trim(); }
-      else { u = { id: uid(), nome: f.nome.trim(), login: tel, tel: f.tel.trim(), senha: await hash(f.senha), role: 'cliente', criado: today() }; S.users.push(u); }
-      save(); localStorage.setItem(SESS_KEY, u.id); boot();
-    }
+    const f = Object.fromEntries(new FormData(e.target)), btn = e.target.querySelector('.btn');
+    btn.disabled = true;
+    try {
+      const r = await api('POST', tab === 'entrar' ? '/api/login' : '/api/register', f);
+      setToken(r.token); boot();
+    } catch (err) { $('#err').textContent = err.message; btn.disabled = false; }
   };
 }
 
@@ -198,7 +247,7 @@ const NAV_CLI = [['agendar', '➕', 'Agendar'], ['meus', '📅', 'Meus horários
 
 function shell(title, actions, body) {
   const nav = me.role === 'admin' ? NAV_ADMIN : NAV_CLI;
-  const n = NICHOS[S.config.nicho];
+  const n = NICHOS[S.config.nicho] || NICHOS.barbearia;
   const bottom = me.role === 'admin' ? nav.slice(0, 4) : nav;
   const extra = me.role === 'admin' ? nav.slice(4) : [];
   $('#app').innerHTML = `
@@ -209,6 +258,7 @@ function shell(title, actions, body) {
       <div class="me"><b>${esc(me.nome)}</b><div class="mut">${me.role === 'admin' ? 'Administrador' : 'Cliente'}</div><button class="btn ghost sm" style="margin-top:8px" onclick="logout()">Sair</button></div>
     </aside>
     <main class="main">
+      ${avisoVencimento()}
       <div class="top"><h2>${title}</h2><div class="acts">${actions || ''}</div></div>
       ${body}
     </main>
@@ -219,11 +269,22 @@ function shell(title, actions, body) {
     <a onclick="logout()"><span class="i">🚪</span>Sair</a></div>`;
 }
 
-function go(v) {
+function avisoVencimento() {
+  if (me?.role !== 'admin' || !ASSIN?.vence) return '';
+  const dias = Math.round((new Date(ASSIN.vence + 'T12:00') - new Date(today() + 'T12:00')) / 864e5);
+  if (dias > 5) return '';
+  const sup = PUB.suporte ? ` <a style="color:#fff;text-decoration:underline" target="_blank" rel="noopener" href="https://wa.me/${PUB.suporte}?text=${encodeURIComponent('Olá! Quero renovar o acesso do ' + S.config.negocio + '.')}">Renovar agora</a>` : '';
+  return `<div class="card" style="background:var(--warn);color:#1a1300;border:0;margin-bottom:14px;font-weight:700">⏳ Sua assinatura ${dias <= 0 ? 'vence hoje' : `vence em ${dias} dia(s)`} (${fmtData(ASSIN.vence)}).${sup}</div>`;
+}
+
+function go(v, keepScroll) {
+  if (me.role !== 'admin' && !CLI_VIEWS.includes(v)) v = 'agendar';
+  if (me.role === 'admin' && CLI_VIEWS.includes(v)) v = 'dashboard';
+  const mudou = v !== view;
   view = v;
-  const r = { dashboard: vDashboard, agenda: vAgenda, vendas: vVendas, financeiro: vFinanceiro, estoque: vEstoque, compras: vCompras, clientes: vClientes, servicos: vServicos, config: vConfig, agendar: vAgendar, meus: vMeus, perfil: vPerfil }[v];
-  if (me.role !== 'admin' && !['agendar', 'meus', 'perfil'].includes(v)) return go('agendar');
-  r(); window.scrollTo(0, 0);
+  if (v === 'agendar' && mudou) ui.slots = {};
+  ({ dashboard: vDashboard, agenda: vAgenda, vendas: vVendas, financeiro: vFinanceiro, estoque: vEstoque, compras: vCompras, clientes: vClientes, servicos: vServicos, config: vConfig, agendar: vAgendar, meus: vMeus, perfil: vPerfil })[v]();
+  if (!keepScroll) window.scrollTo(0, 0);
 }
 
 /* ---------------- modal ---------------- */
@@ -232,15 +293,22 @@ function openModal(title, html, onSubmit) {
   $('#modal-body').innerHTML = html;
   $('#modal').classList.remove('hidden');
   const f = $('#modal-body form');
-  if (f && onSubmit) f.onsubmit = async e => { e.preventDefault(); if ((await onSubmit(Object.fromEntries(new FormData(f)), f)) !== false) closeModal(); };
+  if (f && onSubmit) f.onsubmit = async e => {
+    e.preventDefault();
+    try { if ((await onSubmit(Object.fromEntries(new FormData(f)), f)) !== false) closeModal(); }
+    catch (err) { const m = $('#mErr'); m ? m.textContent = err.message : toast(err.message); }
+  };
   const first = $('#modal-body input, #modal-body select'); if (first) setTimeout(() => first.focus(), 50);
 }
-function closeModal() { $('#modal').classList.add('hidden'); $('#modal-body').innerHTML = ''; }
+function closeModal() {
+  $('#modal').classList.add('hidden'); $('#modal-body').innerHTML = '';
+  if (renderPendente) { renderPendente = false; rerender(); }
+}
 $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); });
 const foot = (txt = 'Salvar') => `<div class="modal-foot"><button type="button" class="btn ghost" onclick="closeModal()">Cancelar</button><button class="btn">${txt}</button></div>`;
 const opts = (arr, sel, val = x => x.id, lbl = x => x.nome) => arr.map(x => `<option value="${esc(val(x))}" ${val(x) === sel ? 'selected' : ''}>${esc(lbl(x))}</option>`).join('');
 
-/* ---------------- disponibilidade ---------------- */
+/* ---------------- disponibilidade (painel do dono) ---------------- */
 function slotsLivres(data, profId, duracao, ignorarId) {
   const c = S.config;
   const dow = new Date(data + 'T12:00').getDay();
@@ -259,6 +327,7 @@ function slotsLivres(data, profId, duracao, ignorarId) {
 }
 const profsAtivos = () => S.profissionais.filter(p => p.ativo !== false);
 const servAtivos = () => S.servicos.filter(s => s.ativo !== false);
+const tagApp = a => a.criadoPor === 'cliente' ? ' <span class="pill app">📱 app</span>' : '';
 
 /* ================= ADMIN ================= */
 
@@ -273,29 +342,31 @@ function vDashboard() {
   const ticket = concMes.length ? concMes.reduce((s, a) => s + a.valor, 0) / concMes.length : 0;
   const baixo = S.produtos.filter(p => p.qtd <= p.min);
   const novosCli = S.users.filter(u => u.role === 'cliente' && (u.criado || '').startsWith(mes)).length;
+  const viaApp = S.agendamentos.filter(a => a.criadoPor === 'cliente' && a.data.startsWith(mes)).length;
 
-  const prox = S.agendamentos.filter(a => a.status === 'agendado' && (a.data > hoje || (a.data === hoje)))
-    .sort((a, b) => (a.data + a.hora).localeCompare(b.data + b.hora)).slice(0, 6);
+  const prox = S.agendamentos.filter(a => a.status === 'agendado' && a.data >= hoje)
+    .sort((a, b) => (a.data + a.hora).localeCompare(b.data + b.hora)).slice(0, 8);
 
   const rank = {};
   concMes.forEach(a => { rank[a.servicoNome] = (rank[a.servicoNome] || 0) + a.valor; });
   const top = Object.entries(rank).sort((a, b) => b[1] - a[1]).slice(0, 5);
   const topMax = top[0]?.[1] || 1;
 
-  shell('Dashboard', `<button class="btn" onclick="novoAgendamento()">+ Agendamento</button>`, `
+  shell('Dashboard', `<button class="btn ghost" onclick="formMetas()">🎯 Metas</button><button class="btn" onclick="novoAgendamento()">+ Agendamento</button>`, `
+  ${blocoMetas()}
   <div class="grid kpis">
-    <div class="card kpi"><div class="l">Faturamento hoje</div><div class="v">${brl(entHoje)}</div><div class="s">${agHoje.length} atendimento(s) na agenda</div></div>
+    <div class="card kpi"><div class="l">Faturamento hoje</div><div class="v">${brl(entHoje)}</div><div class="s">${agHoje.length} atendimento(s) hoje</div></div>
     <div class="card kpi"><div class="l">Entradas no mês</div><div class="v pos">${brl(entMes)}</div><div class="s">${concMes.length} serviços concluídos</div></div>
     <div class="card kpi"><div class="l">Saídas no mês</div><div class="v neg">${brl(saiMes)}</div><div class="s">despesas + compras</div></div>
     <div class="card kpi"><div class="l">Lucro do mês</div><div class="v ${entMes - saiMes >= 0 ? 'pos' : 'neg'}">${brl(entMes - saiMes)}</div><div class="s">entradas − saídas</div></div>
     <div class="card kpi"><div class="l">Ticket médio</div><div class="v">${brl(ticket)}</div><div class="s">por serviço no mês</div></div>
-    <div class="card kpi"><div class="l">Clientes novos</div><div class="v">${novosCli}</div><div class="s">${S.users.filter(u => u.role === 'cliente').length} no total</div></div>
+    <div class="card kpi"><div class="l">Agendados pelo app</div><div class="v">${viaApp}</div><div class="s">${novosCli} cliente(s) novo(s) no mês</div></div>
   </div>
   <div class="grid two" style="margin-top:12px">
     <div class="card"><h3>Entradas × saídas — últimos 14 dias</h3><canvas id="ch" class="chart"></canvas>
       <div class="small mut" style="display:flex;gap:14px;margin-top:6px"><span><b style="color:var(--ac)">■</b> Entradas</span><span><b style="color:var(--mut)">■</b> Saídas</span></div></div>
     <div class="card"><h3>Próximos atendimentos</h3>
-      ${prox.length ? `<div class="list">${prox.map(a => `<div class="item"><div class="hour">${a.hora}</div><div class="grow"><div class="t">${esc(a.clienteNome)}</div><div class="d">${esc(a.servicoNome)} · ${a.data === hoje ? 'hoje' : fmtData(a.data)}</div></div></div>`).join('')}</div>` : '<div class="empty">Nenhum horário marcado.</div>'}
+      ${prox.length ? `<div class="list">${prox.map(a => `<div class="item ${ui.novos.has(a.id) ? 'novo' : ''}"><div class="hour">${a.hora}</div><div class="grow"><div class="t">${esc(a.clienteNome)}${tagApp(a)}</div><div class="d">${esc(a.servicoNome)} · ${a.data === hoje ? 'hoje' : fmtData(a.data)}</div></div></div>`).join('')}</div>` : '<div class="empty">Nenhum horário marcado.</div>'}
     </div>
   </div>
   <div class="grid two" style="margin-top:12px">
@@ -307,6 +378,73 @@ function vDashboard() {
     </div>
   </div>`);
   drawChart();
+}
+
+/* ----- metas do mês ----- */
+function diasUteisMes(mes) {
+  const [y, m] = mes.split('-').map(Number), total = new Date(y, m, 0).getDate(), hoje = today(), dias = S.config.dias;
+  let tot = 0, passados = 0, restantes = 0;
+  for (let d = 1; d <= total; d++) {
+    const iso = `${mes}-${pad(d)}`;
+    if (!dias.includes(new Date(iso + 'T12:00').getDay())) continue;
+    tot++;
+    if (iso < hoje) passados++; else restantes++;
+  }
+  return { tot, passados, restantes };
+}
+function realizadoMes(mes) {
+  return {
+    faturamento: S.lancamentos.filter(l => l.tipo === 'entrada' && l.data.startsWith(mes)).reduce((s, l) => s + l.valor, 0),
+    atendimentos: S.agendamentos.filter(a => a.status === 'concluido' && a.data.startsWith(mes)).length,
+    vendas: S.vendas.filter(v => v.data.startsWith(mes)).reduce((s, v) => s + v.total, 0),
+    clientes: S.users.filter(u => u.role === 'cliente' && (u.criado || '').startsWith(mes)).length
+  };
+}
+const METAS = [
+  ['faturamento', '💰 Faturamento', true],
+  ['atendimentos', '✂️ Atendimentos concluídos', false],
+  ['vendas', '🛍️ Venda de produtos', true],
+  ['clientes', '👥 Clientes novos', false]
+];
+function blocoMetas() {
+  const metas = S.config.metas || {}, mes = mesAtual();
+  const ativas = METAS.filter(([k]) => metas[k] > 0);
+  if (!ativas.length) return `<div class="card" style="margin-bottom:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <div style="font-size:1.8rem">🎯</div><div class="grow" style="flex:1;min-width:180px"><b>Defina suas metas do mês</b><div class="mut small">Faturamento, atendimentos, vendas e clientes novos, com o quanto falta por dia.</div></div>
+    <button class="btn sm" onclick="formMetas()">Definir metas</button></div>`;
+  const real = realizadoMes(mes), du = diasUteisMes(mes);
+  const ritmo = du.tot ? du.passados / du.tot : 0;
+  const fmt = (k, v) => METAS.find(m => m[0] === k)[2] ? brl(v) : Math.round(v);
+  const nomeMes = new Date(mes + '-15T12:00').toLocaleDateString('pt-BR', { month: 'long' });
+  return `<div class="card" style="margin-bottom:12px">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px"><h3 style="margin:0">🎯 Metas de ${nomeMes}</h3><span class="mut small">${du.restantes} dia(s) de atendimento restantes</span></div>
+    <div class="metas">${ativas.map(([k, label]) => {
+      const meta = metas[k], feito = real[k], pct = Math.min(100, feito / meta * 100), falta = Math.max(0, meta - feito);
+      const porDia = du.restantes ? falta / du.restantes : falta;
+      const adiantado = feito / meta >= ritmo;
+      const status = feito >= meta ? '<span class="pos">Meta batida! 🎉</span>'
+        : `Faltam <b>${fmt(k, falta)}</b>${du.restantes ? ` · ~${fmt(k, METAS.find(m => m[0] === k)[2] ? porDia : Math.ceil(porDia))}/dia` : ''} · <span class="${adiantado ? 'pos' : 'neg'}">${adiantado ? 'no ritmo' : 'abaixo do ritmo'}</span>`;
+      return `<div class="meta"><div class="lbl"><span>${label}</span><span><b>${fmt(k, feito)}</b> <span class="mut small">de ${fmt(k, meta)} · ${Math.round(feito / meta * 100)}%</span></span></div>
+        <div class="tr"><div class="fl ${feito >= meta ? 'ok' : ''}" style="width:${pct.toFixed(1)}%"></div>${ritmo > 0 && ritmo < 1 ? `<div class="ritmo" style="left:${(ritmo * 100).toFixed(1)}%" title="Onde você deveria estar hoje"></div>` : ''}</div>
+        <div class="s">${status}</div></div>`;
+    }).join('')}</div>
+    <div class="mut small" style="margin-top:10px">A linha branca mostra onde você deveria estar hoje para bater a meta no fim do mês.</div>
+  </div>`;
+}
+function formMetas() {
+  const m = S.config.metas || {};
+  const ant = new Date(mesAtual() + '-01T12:00'); ant.setMonth(ant.getMonth() - 1);
+  const real = realizadoMes(iso(ant).slice(0, 7));
+  openModal('🎯 Metas do mês', `
+  <form>
+    <p class="mut small">Deixe em branco o que não quiser acompanhar. As metas valem para todo mês até você mudar.</p>
+    ${METAS.map(([k, label, dinheiro]) => `<label>${label}${dinheiro ? ' (R$)' : ''} <span class="mut">· mês passado: ${dinheiro ? brl(real[k]) : real[k]}</span></label>
+      <input name="${k}" inputmode="decimal" value="${m[k] || ''}" placeholder="${dinheiro ? 'Ex.: 8000' : 'Ex.: 120'}">`).join('')}
+    ${foot()}
+  </form>`, f => {
+    S.config.metas = Object.fromEntries(METAS.map(([k]) => [k, num(f[k])]));
+    save(); toast('Metas salvas'); go(view);
+  });
 }
 
 function drawChart() {
@@ -351,15 +489,22 @@ function vAgenda() {
   </div>
   <div class="card">
     <div class="small mut" style="margin-bottom:6px">${DIAS[new Date(d + 'T12:00').getDay()]}, ${fmtData(d)} · ${lista.filter(a => a.status !== 'cancelado').length} agendamento(s) · previsto ${brl(prev)}</div>
-    ${lista.length ? `<div class="list">${lista.map(a => `
-      <div class="item">
-        <div class="hour">${a.hora}</div>
-        <div class="grow"><div class="t">${esc(a.clienteNome)}</div>
-          <div class="d">${esc(a.servicoNome)} · ${brl(a.valor)} · ${a.duracao}min${S.profissionais.length > 1 ? ' · ' + esc(byId('profissionais', a.profId)?.nome || '') : ''}${a.tel ? ' · ' + esc(a.tel) : ''}${a.pagamento ? ' · ' + a.pagamento : ''}</div></div>
-        <span class="pill ${a.status}">${a.status}</span>
-        ${a.status === 'agendado' ? `<div class="acts"><button class="btn ok sm" onclick="concluir('${a.id}')">Concluir</button><button class="btn ghost sm" onclick="novoAgendamento('${a.id}')">Editar</button><button class="btn ghost sm" onclick="cancelarAg('${a.id}')">✕</button></div>` : ''}
-        ${a.tel ? `<a class="icon-btn" title="WhatsApp" target="_blank" rel="noopener" href="https://wa.me/55${a.tel.replace(/\D/g, '')}?text=${encodeURIComponent(`Olá ${a.clienteNome}! Confirmando seu horário em ${S.config.negocio}: ${fmtData(a.data)} às ${a.hora} (${a.servicoNome}).`)}">💬</a>` : ''}
-      </div>`).join('')}</div>` : '<div class="empty">Agenda livre neste dia.</div>'}
+    ${lista.length ? `<div class="list">${lista.map(a => {
+      const extra = [S.profissionais.length > 1 ? esc(byId('profissionais', a.profId)?.nome || '') : '', a.tel ? esc(a.tel) : '', a.pagamento || '', a.obs ? '“' + esc(a.obs) + '”' : '', a.canceladoPor === 'cliente' ? 'cancelado pelo cliente' : ''].filter(Boolean).join(' · ');
+      const wa = a.tel ? `https://wa.me/55${a.tel.replace(/\D/g, '').replace(/^55(?=\d{10,11}$)/, '')}?text=${encodeURIComponent(`Olá ${a.clienteNome}! Confirmando seu horário em ${S.config.negocio}: ${fmtData(a.data)} às ${a.hora} (${a.servicoNome}).`)}` : '';
+      return `<div class="ag ${ui.novos.has(a.id) ? 'novo' : ''} ${a.status}">
+        <div class="ag-hora">${a.hora}<small>${a.duracao} min</small></div>
+        <div class="ag-info">
+          <div class="ag-top"><b>${esc(a.clienteNome)}</b>${tagApp(a)}<span class="pill ${a.status}">${a.status}</span></div>
+          <div class="d">${esc(a.servicoNome)} · <b style="color:var(--tx)">${brl(a.valor)}</b></div>
+          ${extra ? `<div class="d">${extra}</div>` : ''}
+          ${a.status === 'agendado' || wa ? `<div class="ag-acts">
+            ${a.status === 'agendado' ? `<button class="btn ok sm" onclick="concluir('${a.id}')">✓ Concluir</button><button class="btn ghost sm" onclick="novoAgendamento('${a.id}')">Editar</button><button class="btn ghost sm" onclick="cancelarAg('${a.id}')">Cancelar</button>` : ''}
+            ${wa ? `<a class="btn ghost sm" target="_blank" rel="noopener" href="${wa}">💬 WhatsApp</a>` : ''}
+          </div>` : ''}
+        </div>
+      </div>`;
+    }).join('')}</div>` : '<div class="empty">Agenda livre neste dia.</div>'}
   </div>`);
 }
 
@@ -384,7 +529,7 @@ function novoAgendamento(id) {
     if (!nome) { $('#mErr').textContent = 'Informe o cliente.'; return false; }
     if (!f.hora) { $('#mErr').textContent = 'Sem horário livre nesse dia.'; return false; }
     const dados = { clienteId: cli?.id || '', clienteNome: nome, tel: cli ? cli.tel : f.tel, servicoId: sv.id, servicoNome: sv.nome, valor: sv.preco, duracao: sv.duracao, profId: f.profId, data: f.data, hora: f.hora, obs: f.obs };
-    if (a) Object.assign(a, dados); else S.agendamentos.push({ id: uid(), status: 'agendado', criadoPor: 'admin', ...dados });
+    if (a) Object.assign(a, dados); else S.agendamentos.push({ id: uid(), status: 'agendado', criadoPor: 'admin', criadoEm: new Date().toISOString(), ...dados });
     save(); toast(a ? 'Agendamento atualizado' : 'Agendado!'); ui.agendaData = f.data; go(view === 'dashboard' ? 'dashboard' : 'agenda');
   });
   const upd = () => {
@@ -409,12 +554,12 @@ function concluir(id) {
   </form>`, f => {
     a.status = 'concluido'; a.valor = num(f.valor); a.pagamento = f.pag;
     lancar('entrada', `${a.servicoNome} — ${a.clienteNome}`, a.valor, 'Serviço', a.data < today() ? a.data : today(), a.id, f.pag);
-    save(); toast('Atendimento concluído'); go(view);
+    save(); toast('Atendimento concluído'); go(view, true);
   });
 }
 function cancelarAg(id) {
   if (!confirm('Cancelar este agendamento?')) return;
-  byId('agendamentos', id).status = 'cancelado'; save(); go(view);
+  byId('agendamentos', id).status = 'cancelado'; save(); go(view, true);
 }
 
 /* ----- vendas ----- */
@@ -507,7 +652,7 @@ function excluirMov(tipo, id) {
   m.itens.forEach(i => { const p = byId('produtos', i.prodId); if (p) p.qtd += tipo === 'venda' ? i.qtd : -i.qtd; });
   S[col] = S[col].filter(x => x.id !== id);
   S.lancamentos = S.lancamentos.filter(l => l.ref !== id);
-  save(); go(view);
+  save(); go(view, true);
 }
 
 /* ----- estoque ----- */
@@ -521,10 +666,14 @@ function vEstoque() {
     <div class="card kpi"><div class="l">Valor em estoque</div><div class="v">${brl(valorCusto)}</div><div class="s">a preço de custo</div></div>
     <div class="card kpi"><div class="l">Abaixo do mínimo</div><div class="v ${S.produtos.some(p => p.qtd <= p.min) ? 'neg' : ''}">${S.produtos.filter(p => p.qtd <= p.min).length}</div></div>
   </div>
-  <div class="filters"><input placeholder="Buscar produto…" value="${esc(ui.busca)}" oninput="ui.busca=this.value;clearTimeout(window._b);window._b=setTimeout(()=>{vEstoque();const i=document.querySelector('.filters input');i.focus();i.setSelectionRange(99,99)},250)"></div>
+  <div class="filters"><input placeholder="Buscar produto…" value="${esc(ui.busca)}" oninput="buscar(this.value,vEstoque)"></div>
   <div class="card">${lista.length ? `<div class="tbl-wrap"><table><tr><th>Produto</th><th>Qtd</th><th>Mín.</th><th>Custo</th><th>Venda</th><th></th></tr>
   ${lista.map(p => `<tr><td><b>${esc(p.nome)}</b>${p.preco ? '' : ' <span class="pill">uso interno</span>'}</td><td>${p.qtd <= p.min ? `<span class="pill baixo">${p.qtd}</span>` : p.qtd}</td><td>${p.min}</td><td>${brl(p.custo)}</td><td>${p.preco ? brl(p.preco) : '—'}</td>
   <td class="acts"><button class="btn ghost sm" onclick="ajusteEstoque('${p.id}')">±</button><button class="icon-btn" onclick="formProduto('${p.id}')">✏️</button></td></tr>`).join('')}</table></div>` : '<div class="empty">Nenhum produto.</div>'}</div>`);
+}
+function buscar(v, fn) {
+  ui.busca = v; clearTimeout(window._b);
+  window._b = setTimeout(() => { fn(); const i = document.querySelector('.filters input'); i.focus(); i.setSelectionRange(99, 99); }, 250);
 }
 function formProduto(id) {
   const p = id ? byId('produtos', id) : null;
@@ -606,11 +755,11 @@ function vClientes() {
   const cli = S.users.filter(u => u.role === 'cliente' && (u.nome.toLowerCase().includes(q) || (u.tel || '').includes(q))).sort((a, b) => a.nome.localeCompare(b.nome));
   const stats = id => { const ag = S.agendamentos.filter(a => a.clienteId === id && a.status === 'concluido'); return { n: ag.length, tot: ag.reduce((s, a) => s + a.valor, 0), ult: ag.map(a => a.data).sort().pop() }; };
   shell('Clientes', `<button class="btn" onclick="formCliente()">+ Cliente</button>`, `
-  <div class="filters"><input placeholder="Buscar por nome ou telefone…" value="${esc(ui.busca)}" oninput="ui.busca=this.value;clearTimeout(window._b);window._b=setTimeout(()=>{vClientes();const i=document.querySelector('.filters input');i.focus();i.setSelectionRange(99,99)},250)"></div>
+  <div class="filters"><input placeholder="Buscar por nome ou telefone…" value="${esc(ui.busca)}" oninput="buscar(this.value,vClientes)"></div>
   <div class="card">${cli.length ? `<div class="list">${cli.map(c => { const s = stats(c.id); return `
-    <div class="item"><div class="grow"><div class="t">${esc(c.nome)}</div><div class="d">${esc(c.tel || '')} · ${s.n} visita(s) · ${brl(s.tot)}${s.ult ? ' · última ' + fmtData(s.ult) : ''}${c.senha ? '' : ' · sem acesso ao app'}</div></div>
-    ${c.tel ? `<a class="icon-btn" target="_blank" rel="noopener" href="https://wa.me/55${c.tel.replace(/\D/g, '')}">💬</a>` : ''}
-    <button class="icon-btn" onclick="formCliente('${c.id}')">✏️</button></div>`; }).join('')}</div>` : '<div class="empty">Nenhum cliente ainda. Clientes também podem se cadastrar sozinhos pela tela de login.</div>'}</div>`);
+    <div class="item"><div class="grow"><div class="t">${esc(c.nome)}${c.hasSenha ? ' <span class="pill app">📱 usa o app</span>' : ''}</div><div class="d">${esc(c.tel || '')} · ${s.n} visita(s) · ${brl(s.tot)}${s.ult ? ' · última ' + fmtData(s.ult) : ''}</div></div>
+    ${c.tel ? `<a class="icon-btn" target="_blank" rel="noopener" href="https://wa.me/55${c.tel.replace(/\D/g, '').replace(/^55(?=\d{10,11}$)/, '')}">💬</a>` : ''}
+    <button class="icon-btn" onclick="formCliente('${c.id}')">✏️</button></div>`; }).join('')}</div>` : '<div class="empty">Nenhum cliente ainda. Envie o link de agendamento (em Ajustes) para seus clientes se cadastrarem.</div>'}</div>`);
 }
 function formCliente(id) {
   const c = id ? byId('users', id) : null;
@@ -618,16 +767,18 @@ function formCliente(id) {
   <form>
     <label>Nome</label><input name="nome" required value="${esc(c?.nome || '')}">
     <label>Telefone / WhatsApp</label><input name="tel" required inputmode="tel" value="${esc(c?.tel || '')}">
-    <label>Senha de acesso ao app <span class="mut">(opcional${c?.senha ? ', deixe vazio para manter' : ''})</span></label><input name="senha" type="password" minlength="4" autocomplete="new-password">
+    <label>Senha de acesso ao app <span class="mut">(opcional${c?.hasSenha ? ', deixe vazio para manter' : ''})</span></label><input name="senha" type="password" minlength="4" autocomplete="new-password">
     <label>Anotações</label><textarea name="obs" rows="2">${esc(c?.obs || '')}</textarea>
+    <label><input type="checkbox" name="bloq" ${c?.bloqueado ? 'checked' : ''} style="width:auto;margin-right:6px">Bloquear acesso ao app</label>
     <div class="err" id="mErr"></div>
     ${foot()}
-  </form>`, async f => {
+  </form>`, f => {
     const tel = f.tel.replace(/\D/g, '');
+    if (tel.length < 10) { $('#mErr').textContent = 'Telefone com DDD.'; return false; }
     if (S.users.some(u => u.login === tel && u.id !== id)) { $('#mErr').textContent = 'Já existe cliente com esse telefone.'; return false; }
-    const d = { nome: f.nome.trim(), tel: f.tel.trim(), login: tel, obs: f.obs };
-    if (f.senha) d.senha = await hash(f.senha);
-    if (c) Object.assign(c, d); else S.users.push({ id: uid(), role: 'cliente', criado: today(), senha: '', ...d });
+    const d = { nome: f.nome.trim(), tel: f.tel.trim(), login: tel, obs: f.obs, bloqueado: !!f.bloq };
+    if (f.senha) d.novaSenha = f.senha;
+    if (c) Object.assign(c, d); else S.users.push({ id: uid(), role: 'cliente', criado: today(), hasSenha: false, ...d });
     save(); vClientes();
   });
 }
@@ -635,6 +786,7 @@ function formCliente(id) {
 /* ----- serviços ----- */
 function vServicos() {
   shell('Serviços', `<button class="btn" onclick="formServico()">+ Serviço</button>`, `
+  <p class="mut small" style="margin-bottom:10px">Os serviços ativos aparecem para os clientes na tela de agendamento.</p>
   <div class="card"><div class="list">${S.servicos.map(s => `
     <div class="item"><div class="grow"><div class="t">${esc(s.nome)} ${s.ativo === false ? '<span class="pill">inativo</span>' : ''}</div><div class="d">${s.duracao} min</div></div>
     <b>${brl(s.preco)}</b><button class="icon-btn" onclick="formServico('${s.id}')">✏️</button></div>`).join('') || '<div class="empty">Nenhum serviço.</div>'}</div></div>`);
@@ -658,34 +810,53 @@ function formServico(id) {
 /* ----- ajustes ----- */
 function vConfig() {
   const c = S.config;
+  const link = location.origin + '/' + SLUG;
+  const convite = `Agende seu horário em ${c.negocio} pelo celular: ${link}`;
+  const pushOk = 'serviceWorker' in navigator && 'PushManager' in window;
   shell('Ajustes', '', `
   <div class="grid two">
-    <div class="card"><h3>Estabelecimento</h3>
-      <form id="fc">
-        <label>Nome</label><input name="negocio" value="${esc(c.negocio)}" required>
-        <label>Nicho</label><select name="nicho">${Object.entries(NICHOS).map(([k, n]) => `<option value="${k}" ${k === c.nicho ? 'selected' : ''}>${n.icon} ${n.label}</option>`).join('')}</select>
-        <div class="row"><div><label>Abre às</label><input type="time" name="abre" value="${c.abre}"></div><div><label>Fecha às</label><input type="time" name="fecha" value="${c.fecha}"></div></div>
-        <label>Intervalo entre horários (min)</label><select name="intervalo">${[10, 15, 20, 30, 45, 60].map(m => `<option ${m == c.intervalo ? 'selected' : ''}>${m}</option>`).join('')}</select>
-        <label>Dias de atendimento</label>
-        <div class="chips">${DIAS.map((d, i) => `<label class="chip ${c.dias.includes(i) ? 'on' : ''}" style="margin:0"><input type="checkbox" name="d${i}" ${c.dias.includes(i) ? 'checked' : ''} class="hidden" onchange="this.parentNode.classList.toggle('on',this.checked)"><b>${d}</b></label>`).join('')}</div>
-        <button class="btn block">Salvar ajustes</button>
-      </form>
+    <div>
+      <div class="card"><h3>Link de agendamento para clientes</h3>
+        <p class="mut small">Envie este link. O cliente cria a conta com o telefone, agenda de casa e o horário aparece aqui na hora.</p>
+        <div class="share"><input id="lnk" value="${esc(link)}" readonly><button class="btn sm" onclick="copiar()">Copiar</button></div>
+        <div class="acts" style="margin-top:10px"><a class="btn ghost sm" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(convite)}">💬 Enviar no WhatsApp</a></div>
+      </div>
+      <div class="card" style="margin-top:12px"><h3>🔔 Notificações de novos agendamentos</h3>
+        <p class="mut small">Aviso no celular quando um cliente agendar ou cancelar, mesmo com o app fechado. Ative em cada aparelho que você usa.</p>
+        ${(() => { const [ic, txt] = statusPush(); return `<p class="small" style="margin-top:10px">${ic} ${txt}</p>`; })()}
+        <div class="acts" style="margin-top:10px">${'PushManager' in window ? `<button class="btn sm" onclick="ativarPush()">${window.Notification?.permission === 'granted' ? 'Reativar neste aparelho' : 'Ativar neste aparelho'}</button><button class="btn ghost sm" id="btnTeste" onclick="testarPush()">Enviar teste</button>` : ''}</div>
+        <p class="small" id="pushRes" style="margin-top:10px"></p>
+      </div>
+      <div class="card" style="margin-top:12px"><h3>Estabelecimento</h3>
+        <form id="fc">
+          <label>Nome</label><input name="negocio" value="${esc(c.negocio)}" required>
+          <label>Nicho</label><input value="${esc((NICHOS[c.nicho] || {}).icon + ' ' + (NICHOS[c.nicho] || {}).label)}" disabled>
+          <div class="row"><div><label>Abre às</label><input type="time" name="abre" value="${c.abre}"></div><div><label>Fecha às</label><input type="time" name="fecha" value="${c.fecha}"></div></div>
+          <label>Intervalo entre horários (min)</label><select name="intervalo">${[10, 15, 20, 30, 45, 60].map(m => `<option ${m == c.intervalo ? 'selected' : ''}>${m}</option>`).join('')}</select>
+          <label>Dias de atendimento</label>
+          <div class="chips wrap">${DIAS.map((d, i) => `<label class="chip ${c.dias.includes(i) ? 'on' : ''}" style="margin:0"><input type="checkbox" name="d${i}" ${c.dias.includes(i) ? 'checked' : ''} class="hidden" onchange="this.parentNode.classList.toggle('on',this.checked)"><b>${d}</b></label>`).join('')}</div>
+          <button class="btn block">Salvar ajustes</button>
+        </form>
+      </div>
     </div>
     <div>
       <div class="card"><h3>Profissionais</h3>
+        <p class="mut small">Com mais de um ativo, o cliente escolhe com quem quer ser atendido.</p>
         <div class="list">${S.profissionais.map(p => `<div class="item"><div class="grow"><div class="t">${esc(p.nome)}</div></div>${p.ativo === false ? '<span class="pill">inativo</span>' : ''}
           <button class="btn ghost sm" onclick="byId('profissionais','${p.id}').ativo=${p.ativo === false};save();vConfig()">${p.ativo === false ? 'Ativar' : 'Desativar'}</button></div>`).join('')}</div>
         <button class="btn ghost sm" style="margin-top:10px" onclick="formProf()">+ Profissional</button>
       </div>
+      <div class="card" style="margin-top:12px"><h3>Assinatura</h3>
+        <p class="small">${ASSIN?.vence ? `Válida até <b>${fmtData(ASSIN.vence)}</b>` : 'Ativa'}${PUB.suporte ? ` · <a style="color:var(--ac)" target="_blank" rel="noopener" href="https://wa.me/${PUB.suporte}">falar com o suporte</a>` : ''}</p>
+      </div>
       <div class="card" style="margin-top:12px"><h3>Acesso do administrador</h3>
-        <button class="btn ghost sm" onclick="formSenhaAdmin()">Trocar minha senha</button>
+        <button class="btn ghost sm" onclick="formSenhaAdmin()">Trocar usuário / senha</button>
       </div>
       <div class="card" style="margin-top:12px"><h3>Backup</h3>
-        <p class="mut small">Os dados ficam salvos neste aparelho. Faça backup com frequência.</p>
+        <p class="mut small">Os dados ficam no servidor. Baixe uma cópia de segurança de vez em quando.</p>
         <div class="acts" style="margin-top:10px">
-          <button class="btn ghost sm" onclick="baixar('agendapro-backup-'+today()+'.json',JSON.stringify(S),'application/json')">Baixar backup</button>
+          <button class="btn ghost sm" onclick="baixarBackup()">Baixar backup</button>
           <label class="btn ghost sm" style="margin:0;color:var(--tx)">Restaurar<input type="file" accept=".json" class="hidden" onchange="restaurar(this.files[0])"></label>
-          <button class="btn bad sm" onclick="if(prompt('Isso apaga TODOS os dados. Digite APAGAR para confirmar')==='APAGAR'){localStorage.removeItem(DB_KEY);localStorage.removeItem(SESS_KEY);S=blank();boot()}">Zerar sistema</button>
         </div>
       </div>
     </div>
@@ -695,36 +866,107 @@ function vConfig() {
     const f = Object.fromEntries(new FormData(e.target));
     const dias = DIAS.map((_, i) => f['d' + i] ? i : -1).filter(i => i >= 0);
     if (!dias.length) return toast('Escolha ao menos um dia');
-    const trocou = f.nicho !== c.nicho;
-    Object.assign(c, { negocio: f.negocio.trim(), nicho: f.nicho, abre: f.abre, fecha: f.fecha, intervalo: Number(f.intervalo), dias });
-    if (trocou && confirm(`Carregar a lista padrão de serviços de ${NICHOS[f.nicho].label}? (os serviços atuais serão substituídos)`)) seedNicho(f.nicho);
+    Object.assign(c, { negocio: f.negocio.trim(), abre: f.abre, fecha: f.fecha, intervalo: Number(f.intervalo), dias });
     save(); applyTheme(); toast('Ajustes salvos'); vConfig();
   };
+}
+function copiar() {
+  const i = $('#lnk'); i.select();
+  (navigator.clipboard?.writeText(i.value) || Promise.reject()).then(() => toast('Link copiado'), () => { document.execCommand('copy'); toast('Link copiado'); });
 }
 function formProf() {
   openModal('Novo profissional', `<form><label>Nome</label><input name="nome" required>${foot()}</form>`,
     f => { S.profissionais.push({ id: uid(), nome: f.nome.trim(), ativo: true }); save(); vConfig(); });
 }
 function formSenhaAdmin() {
-  openModal('Trocar senha', `<form><label>Usuário</label><input name="login" value="${esc(me.login)}" required autocapitalize="none">
-    <label>Senha atual</label><input type="password" name="a" required><label>Nova senha</label><input type="password" name="n" minlength="4" required>
+  openModal('Trocar usuário / senha', `<form><label>Usuário</label><input name="login" value="${esc(me.login)}" required autocapitalize="none">
+    <label>Senha atual</label><input type="password" name="atual" required autocomplete="current-password"><label>Nova senha</label><input type="password" name="nova" minlength="4" required autocomplete="new-password">
     <div class="err" id="mErr"></div>${foot()}</form>`, async f => {
-    if (await hash(f.a) !== me.senha) { $('#mErr').textContent = 'Senha atual incorreta.'; return false; }
-    me.login = f.login.trim().toLowerCase(); me.senha = await hash(f.n); save(); toast('Senha alterada');
+    await api('POST', '/api/senha', f); me.login = f.login.trim().toLowerCase(); toast('Senha alterada');
   });
+}
+async function baixarBackup() {
+  try { const d = await api('GET', '/api/backup'); baixar('agendapro-backup-' + today() + '.json', JSON.stringify(d), 'application/json'); }
+  catch (e) { toast(e.message); }
 }
 function restaurar(file) {
   if (!file) return;
   const r = new FileReader();
-  r.onload = () => {
+  r.onload = async () => {
     try {
       const d = JSON.parse(r.result);
-      if (!d.config || !Array.isArray(d.users)) throw 0;
+      if (!d.config || !Array.isArray(d.users)) throw new Error('Arquivo de backup inválido.');
       if (!confirm('Substituir os dados atuais pelo backup?')) return;
-      S = Object.assign(blank(), d); save(); toast('Backup restaurado'); boot();
-    } catch { alert('Arquivo de backup inválido.'); }
+      await api('POST', '/api/restore', d); toast('Backup restaurado'); boot();
+    } catch (e) { alert(e.message || 'Arquivo de backup inválido.'); }
   };
   r.readAsText(file);
+}
+
+/* ----- notificações push ----- */
+function b64ToU8(b64) {
+  const s = atob((b64 + '='.repeat((4 - b64.length % 4) % 4)).replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from(s, c => c.charCodeAt(0));
+}
+function nomeAparelho() {
+  const ua = navigator.userAgent;
+  const so = /iPhone|iPad/.test(ua) ? 'iPhone' : /Android/.test(ua) ? 'Android' : /Windows/.test(ua) ? 'Windows' : /Mac/.test(ua) ? 'Mac' : 'Outro';
+  const nav = /SamsungBrowser/.test(ua) ? 'Samsung Internet' : /Edg\//.test(ua) ? 'Edge' : /Firefox/.test(ua) ? 'Firefox' : /Chrome/.test(ua) ? 'Chrome' : /Safari/.test(ua) ? 'Safari' : '';
+  return `${so}${nav ? ' · ' + nav : ''}${matchMedia('(display-mode: standalone)').matches ? ' (app)' : ''}`;
+}
+const chaveIgual = (sub, chave) => {
+  const k = sub?.options?.applicationServerKey; if (!k) return true;
+  const a = new Uint8Array(k), b = b64ToU8(chave);
+  return a.length === b.length && a.every((x, i) => x === b[i]);
+};
+// Cria (ou recria, se foi feita com outra chave) a inscrição deste aparelho e registra no servidor.
+async function inscreverAparelho() {
+  const reg = await navigator.serviceWorker.ready;
+  let sub = await reg.pushManager.getSubscription();
+  if (sub && !chaveIgual(sub, PUB.vapidPublic)) { await sub.unsubscribe().catch(() => { }); sub = null; }
+  if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToU8(PUB.vapidPublic) });
+  return api('POST', '/api/push/subscribe', { sub: sub.toJSON(), aparelho: nomeAparelho() });
+}
+// Ao abrir o painel: se a permissão já foi dada, garante silenciosamente que o servidor conhece este aparelho.
+async function garantirPush() {
+  try {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || Notification.permission !== 'granted') return;
+    await inscreverAparelho();
+  } catch (e) { console.warn('push:', e); }
+}
+function statusPush() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !window.Notification) {
+    return /iPhone|iPad/.test(navigator.userAgent)
+      ? ['⚠️', 'No iPhone, as notificações só funcionam com o app instalado: toque em Compartilhar → <b>Adicionar à Tela de Início</b>, abra pelo ícone e ative aqui (iOS 16.4 ou mais novo).']
+      : ['⚠️', 'Este navegador não suporta notificações. Use o Chrome.'];
+  }
+  if (Notification.permission === 'denied') return ['🚫', 'As notificações estão <b>bloqueadas</b> para este site. Toque no cadeado ao lado do endereço → <b>Permissões / Notificações</b> → <b>Permitir</b>, e depois toque em Ativar.'];
+  if (Notification.permission === 'granted') return ['✅', 'Ativadas neste aparelho. Toque em <b>Enviar teste</b> para conferir.'];
+  return ['🔕', 'Ainda não ativadas neste aparelho.'];
+}
+async function ativarPush() {
+  try {
+    if (Notification.permission === 'denied') return alert('As notificações estão bloqueadas para este site.\n\nToque no cadeado ao lado do endereço → Permissões → Notificações → Permitir. Depois toque em Ativar de novo.');
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') { toast('Permissão de notificação não concedida'); return vConfig(); }
+    const r = await inscreverAparelho();
+    toast(`🔔 Ativado! ${r.aparelhos} aparelho(s) recebendo avisos`, 3500);
+    vConfig(); setTimeout(testarPush, 800);
+  } catch (e) { alert('Não foi possível ativar: ' + e.message); }
+}
+async function testarPush() {
+  const btn = $('#btnTeste'); if (btn) { btn.disabled = true; btn.textContent = 'Enviando…'; }
+  try {
+    if (Notification.permission === 'granted') await inscreverAparelho().catch(() => { });
+    const r = await api('POST', '/api/push/teste');
+    const ok = r.resultados.filter(x => x.ok).length, falha = r.resultados.filter(x => !x.ok);
+    const el = $('#pushRes');
+    const html = !r.resultados.length ? '⚠️ Nenhum aparelho ativado ainda. Toque em <b>Ativar neste aparelho</b>.'
+      : `${ok ? `✅ Enviado para ${ok} aparelho(s). A notificação deve chegar em alguns segundos.` : ''}${falha.length ? `<br>❌ ${falha.length} aparelho(s) recusaram (${esc(falha.map(f => f.aparelho || f.status).join(', '))}) e foram removidos. Toque em <b>Ativar neste aparelho</b> de novo.` : ''}
+         <br><span class="mut">Não chegou? Veja se as notificações do navegador estão permitidas nas configurações do celular e se o modo economia de bateria não está bloqueando.</span>`;
+    if (el) el.innerHTML = html; else toast(ok ? 'Teste enviado' : 'Falhou', 3000);
+  } catch (e) { toast(e.message); }
+  if (btn) { btn.disabled = false; btn.textContent = 'Enviar teste'; }
 }
 
 /* ================= CLIENTE ================= */
@@ -733,51 +975,72 @@ function vAgendar() {
   const profs = profsAtivos();
   if (!b.profId || !profs.some(p => p.id === b.profId)) b.profId = profs[0]?.id;
   const sv = b.servicoId ? byId('servicos', b.servicoId) : null;
-  const dias = [...Array(21)].map((_, i) => addDays(today(), i)).filter(d => S.config.dias.includes(new Date(d + 'T12:00').getDay()));
+  const dias = [...Array(30)].map((_, i) => addDays(today(), i)).filter(d => S.config.dias.includes(new Date(d + 'T12:00').getDay()));
   if (!b.data || !dias.includes(b.data)) b.data = dias[0];
-  const livres = sv && b.data ? slotsLivres(b.data, b.profId, sv.duracao) : [];
-  if (b.hora && !livres.includes(b.hora)) b.hora = '';
+  const key = `${b.servicoId}|${b.profId}|${b.data}`;
+  const livres = ui.slots[key];
+  if (sv && !livres) carregarSlots(key);
+  if (b.hora && livres && !livres.includes(b.hora)) b.hora = '';
+  const passo = profs.length > 1 ? 1 : 0;
   shell(`Olá, ${esc(me.nome.split(' ')[0])}!`, '', `
-  <p class="mut">Escolha o serviço, o dia e o horário.</p>
+  <p class="mut">Escolha o serviço, o dia e o horário em ${esc(S.config.negocio)}.</p>
   <div class="step"><span class="n">1</span>Serviço</div>
   <div class="svc-grid">${servAtivos().map(s => `<button class="svc ${s.id === b.servicoId ? 'on' : ''}" onclick="ui.book.servicoId='${s.id}';ui.book.hora='';vAgendar()"><b>${esc(s.nome)}</b><span class="mut small">${s.duracao} min</span><div class="p">${brl(s.preco)}</div></button>`).join('')}</div>
-  ${profs.length > 1 ? `<div class="step"><span class="n">2</span>Profissional</div>
+  ${passo ? `<div class="step"><span class="n">2</span>Profissional</div>
   <div class="chips">${profs.map(p => `<button class="chip ${p.id === b.profId ? 'on' : ''}" onclick="ui.book.profId='${p.id}';ui.book.hora='';vAgendar()"><b style="font-size:.9rem">${esc(p.nome)}</b></button>`).join('')}</div>` : ''}
-  <div class="step"><span class="n">${profs.length > 1 ? 3 : 2}</span>Dia</div>
+  <div class="step"><span class="n">${2 + passo}</span>Dia</div>
   <div class="chips">${dias.map(d => { const dt = new Date(d + 'T12:00'); return `<button class="chip ${d === b.data ? 'on' : ''}" onclick="ui.book.data='${d}';ui.book.hora='';vAgendar()"><small>${d === today() ? 'Hoje' : DIAS[dt.getDay()]}</small><b>${dt.getDate()}</b><small>${dt.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '')}</small></button>`; }).join('')}</div>
-  <div class="step"><span class="n">${profs.length > 1 ? 4 : 3}</span>Horário</div>
-  ${!sv ? '<p class="mut">Escolha um serviço para ver os horários.</p>' : livres.length ? `<div class="slots">${livres.map(h => `<button class="slot ${h === b.hora ? 'on' : ''}" onclick="ui.book.hora='${h}';vAgendar()">${h}</button>`).join('')}</div>` : '<p class="mut">Sem horários livres neste dia. Tente outro.</p>'}
-  ${sv && b.hora ? `<div class="card summary"><div class="item" style="padding:0"><div class="grow"><div class="t">${esc(sv.nome)} · ${brl(sv.preco)}</div><div class="d">${fmtData(b.data)} às ${b.hora}</div></div><button class="btn" onclick="confirmarCliente()">Confirmar</button></div></div>` : ''}`);
+  <div class="step"><span class="n">${3 + passo}</span>Horário</div>
+  ${!sv ? '<p class="mut">Escolha um serviço para ver os horários.</p>' : !livres ? '<div class="loading">Buscando horários livres…</div>' : livres.length ? `<div class="slots">${livres.map(h => `<button class="slot ${h === b.hora ? 'on' : ''}" onclick="ui.book.hora='${h}';vAgendar()">${h}</button>`).join('')}</div>` : '<p class="mut">Sem horários livres neste dia. Tente outro.</p>'}
+  ${sv && b.hora ? `<div class="card summary"><div class="item" style="padding:0"><div class="grow"><div class="t">${esc(sv.nome)} · ${brl(sv.preco)}</div><div class="d">${fmtData(b.data)} às ${b.hora}</div></div><button class="btn" id="btnConf" onclick="confirmarCliente()">Confirmar</button></div></div>` : ''}`, );
 }
-function confirmarCliente() {
-  const b = ui.book, sv = byId('servicos', b.servicoId);
-  if (!slotsLivres(b.data, b.profId, sv.duracao).includes(b.hora)) { toast('Esse horário acabou de ser ocupado'); return vAgendar(); }
-  S.agendamentos.push({ id: uid(), status: 'agendado', criadoPor: 'cliente', clienteId: me.id, clienteNome: me.nome, tel: me.tel, servicoId: sv.id, servicoNome: sv.nome, valor: sv.preco, duracao: sv.duracao, profId: b.profId, data: b.data, hora: b.hora });
-  save(); ui.book = {}; toast('Horário agendado! ✨'); go('meus');
+async function carregarSlots(key) {
+  if (carregarSlots[key]) return; carregarSlots[key] = 1;
+  const [servicoId, profId, data] = key.split('|');
+  try { ui.slots[key] = (await api('GET', `/api/slots?servicoId=${servicoId}&profId=${profId}&data=${data}`)).slots; }
+  catch (e) { ui.slots[key] = []; toast(e.message); }
+  delete carregarSlots[key];
+  if (view === 'agendar') go('agendar', true);
 }
-function vMeus() {
-  const meus = S.agendamentos.filter(a => a.clienteId === me.id).sort((a, b) => (b.data + b.hora).localeCompare(a.data + a.hora));
+async function confirmarCliente() {
+  const b = ui.book, btn = $('#btnConf'); btn.disabled = true; btn.textContent = 'Enviando…';
+  try {
+    await api('POST', '/api/agendar', { servicoId: b.servicoId, profId: b.profId, data: b.data, hora: b.hora });
+    ui.book = {}; ui.slots = {}; toast('Horário agendado! ✨'); go('meus');
+  } catch (e) {
+    toast(e.message, 4000); ui.slots = {}; b.hora = ''; vAgendar();
+  }
+}
+async function vMeus() {
+  shell('Meus horários', `<button class="btn" onclick="go('agendar')">+ Agendar</button>`, '<div class="loading">Carregando…</div>');
+  let meus;
+  try { meus = (await api('GET', '/api/meus')).agendamentos; } catch (e) { $('.main .loading').textContent = e.message; return; }
+  if (view !== 'meus') return;
+  meus.sort((a, b) => (b.data + b.hora).localeCompare(a.data + a.hora));
   const futuros = meus.filter(a => a.status === 'agendado' && a.data >= today()).reverse();
   const hist = meus.filter(a => !futuros.includes(a));
-  const linha = a => `<div class="item"><div class="hour">${a.hora}</div><div class="grow"><div class="t">${esc(a.servicoNome)}</div><div class="d">${fmtData(a.data)} · ${brl(a.valor)}</div></div><span class="pill ${a.status}">${a.status}</span>
+  const linha = a => `<div class="item"><div class="hour">${a.hora}</div><div class="grow"><div class="t">${esc(a.servicoNome)}</div><div class="d">${DIAS[new Date(a.data + 'T12:00').getDay()]}, ${fmtData(a.data)} · ${brl(a.valor)}</div></div><span class="pill ${a.status}">${a.status}</span>
     ${a.status === 'agendado' && a.data >= today() ? `<button class="btn ghost sm" onclick="cancelarCli('${a.id}')">Cancelar</button>` : ''}</div>`;
   shell('Meus horários', `<button class="btn" onclick="go('agendar')">+ Agendar</button>`, `
   <div class="card"><h3>Próximos</h3>${futuros.length ? `<div class="list">${futuros.map(linha).join('')}</div>` : '<div class="empty">Nenhum horário marcado.</div>'}</div>
   ${hist.length ? `<div class="card" style="margin-top:12px"><h3>Histórico</h3><div class="list">${hist.map(linha).join('')}</div></div>` : ''}`);
 }
-function cancelarCli(id) { if (confirm('Cancelar este horário?')) { byId('agendamentos', id).status = 'cancelado'; save(); vMeus(); } }
+async function cancelarCli(id) {
+  if (!confirm('Cancelar este horário?')) return;
+  try { await api('POST', `/api/meus/${id}/cancelar`); toast('Horário cancelado'); vMeus(); } catch (e) { toast(e.message); }
+}
 function vPerfil() {
   shell('Perfil', '', `
   <div class="card" style="max-width:480px">
     <form id="fp"><label>Nome</label><input name="nome" value="${esc(me.nome)}" required>
       <label>Telefone</label><input value="${esc(me.tel)}" disabled>
-      <label>Nova senha <span class="mut">(opcional)</span></label><input type="password" name="s" minlength="4" autocomplete="new-password">
+      <label>Nova senha <span class="mut">(opcional)</span></label><input type="password" name="senha" minlength="4" autocomplete="new-password">
       <button class="btn block">Salvar</button></form>
     <button class="btn ghost block" onclick="logout()">Sair</button>
   </div>`);
   $('#fp').onsubmit = async e => {
     e.preventDefault(); const f = Object.fromEntries(new FormData(e.target));
-    me.nome = f.nome.trim(); if (f.s) me.senha = await hash(f.s); save(); toast('Perfil atualizado');
+    try { me = (await api('PUT', '/api/me', f)).user; toast('Perfil atualizado'); } catch (err) { toast(err.message); }
   };
 }
 
