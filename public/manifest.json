@@ -2,7 +2,7 @@
   "name": "AgendaPro Beleza",
   "short_name": "AgendaPro",
   "description": "Agendamentos, financeiro, estoque, compras e vendas para barbearia, lash, manicure e salão.",
-  "start_url": "/",
+  "start_url": "/entrar",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",

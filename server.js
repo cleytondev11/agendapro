@@ -555,7 +555,10 @@ function manifestEmpresa(res, slug) {
 }
 function serveStatic(req, res, pathname) {
   const seg = decodeURIComponent(pathname).split('/').filter(Boolean);
-  if (seg.length === 0) pathname = '/site.html';                       // site de vendas
+  if (seg.length === 0) {                                               // site de vendas (se faltar, abre o login)
+    if (!fs.existsSync(path.join(PUBLIC, 'site.html'))) return paginaEmpresa(res, null);
+    pathname = '/site.html';
+  }
   else if (seg[0] === 'entrar' && seg.length === 1) return paginaEmpresa(res, null); // login do assinante
   else if (seg[0] === 'central' && seg.length === 1) pathname = '/central.html';
   else if (seg[0] === 'm' && seg.length === 2 && seg[1].endsWith('.webmanifest')) return manifestEmpresa(res, seg[1].replace('.webmanifest', ''));

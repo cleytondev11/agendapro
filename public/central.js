@@ -97,6 +97,7 @@ function render() {
       <div class="card kpi"><div class="l">Vencidos / bloqueados</div><div class="v neg">${cont('vencida') + cont('bloqueada')}</div><div class="s">sem acesso</div></div>
       <div class="card kpi"><div class="l">Agendamentos no mês</div><div class="v">${E.reduce((s, e) => s + e.agMes, 0)}</div><div class="s">${E.reduce((s, e) => s + e.agApp, 0)} feitos pelos clientes</div></div>
     </div>
+    ${avisoBanco()}
     ${!DADOS.suporte ? `<div class="card" style="margin-top:12px;border-color:var(--warn)"><b>Dica:</b> <span class="mut">adicione a variável <code>SUPORTE_WHATSAPP</code> no Render (ex.: 5561999999999) para os assinantes vencidos verem um botão “Falar com o suporte”.</span></div>` : ''}
     <div class="filters" style="margin-top:16px">
       <div class="tabs-f">${['todas', 'ativa', 'avencer', 'vencida', 'bloqueada'].map(k => `<button class="${ui.filtro === k ? 'on' : ''}" onclick="ui.filtro='${k}';render()">${k === 'todas' ? 'Todas' : STATUS_TXT[k]}</button>`).join('')}</div>
@@ -119,6 +120,14 @@ function render() {
       </div>`;
     }).join('') : `<div class="empty">${E.length ? 'Nada encontrado com esse filtro.' : 'Nenhum assinante ainda. Clique em <b>+ Novo assinante</b> para criar o primeiro acesso.'}</div>`}</div>
   </main>`;
+}
+
+function avisoBanco() {
+  const b = DADOS.banco; if (!b) return '';
+  if (b.tipo !== 'postgres') return `<div class="card" style="margin-top:12px;border-color:var(--bad);background:color-mix(in srgb,var(--bad) 12%,var(--card))">
+    <b style="color:var(--bad)">⚠️ Banco de dados NÃO conectado.</b><br><span class="small">O servidor está salvando em arquivo temporário: <b>tudo o que você criar some quando o Render reiniciar</b>. No Render → Environment, confira se a variável <code>DATABASE_URL</code> existe (com esse nome exato) e tem a connection string do Neon. Depois faça um novo deploy.</span></div>`;
+  if (b.pendentes) return `<div class="card" style="margin-top:12px;border-color:var(--warn)"><b style="color:var(--warn)">⏳ ${b.pendentes} alteração(ões) aguardando gravação no banco.</b> <span class="mut small">O banco não respondeu (${esc(b.ultimoErro || 'sem detalhes')}). O servidor tenta de novo sozinho; nada foi perdido. <a href="#" onclick="carregar();return false" style="color:var(--ac)">Atualizar</a></span></div>`;
+  return `<div class="mut small" style="margin-top:10px">🟢 Banco de dados conectado (PostgreSQL)${b.ultimaGravacao ? ' · última gravação ' + new Date(b.ultimaGravacao).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : ''}</div>`;
 }
 
 /* ---------- criar / editar ---------- */
@@ -144,7 +153,7 @@ function formEmpresa(slug) {
     </div>
     <div class="row">
       <div><label>Vencimento <span class="mut">(vazio = sem vencimento)</span></label><input type="date" name="vence" value="${venc}"></div>
-      <div><label>Valor mensal (R$)</label><input name="valor" inputmode="decimal" value="${e ? e.valor : ''}" placeholder="Ex.: 49,90"></div>
+      <div><label>Valor mensal (R$)</label><input name="valor" inputmode="decimal" value="${e ? e.valor : '49,90'}" placeholder="Ex.: 49,90"></div>
     </div>
     <label>Observação</label><input name="obs" value="${esc(e?.obs || '')}" placeholder="Ex.: pago via Pix, plano anual…">
     ${foot(e ? 'Salvar' : 'Criar acesso')}

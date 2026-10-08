@@ -2,7 +2,7 @@
    Clientes agendam do próprio celular; o painel do dono recebe na hora. */
 
 // Link da empresa: agendapro.com/nome-do-negocio  →  SLUG = 'nome-do-negocio'
-const SLUG = decodeURIComponent(location.pathname.split('/')[1] || '').toLowerCase();
+const SLUG = (s => s === 'entrar' ? '' : s)(decodeURIComponent(location.pathname.split('/')[1] || '').toLowerCase());
 const TOK_KEY = 'agendapro_token_' + SLUG;
 const POLL_MS = 15000;
 
@@ -165,7 +165,7 @@ function renderErro(msg) {
   $('#app').innerHTML = telaSimples('⚠️', 'Sem conexão', `<p class="mut" style="margin-top:10px">${esc(msg)} Verifique sua internet.</p><button class="btn block" onclick="boot()">Tentar de novo</button>`);
 }
 function renderNaoEncontrada() {
-  $('#app').innerHTML = telaSimples('🔎', 'Link não encontrado', `<p class="mut" style="margin-top:10px">Confira se o endereço está certo. Se você é assinante, entre pela página inicial.</p><a class="btn block" href="/">Ir para o login do assinante</a>`);
+  $('#app').innerHTML = telaSimples('🔎', 'Link não encontrado', `<p class="mut" style="margin-top:10px">Confira se o endereço está certo. Se você é assinante, entre pela página inicial.</p><a class="btn block" href="/entrar">Ir para o login do assinante</a>`);
 }
 function renderSuspenso(msg) {
   const sup = PUB?.suporte;
@@ -174,7 +174,7 @@ function renderSuspenso(msg) {
     <p style="margin-top:14px;font-weight:700">${dono ? esc(msg || 'Sua assinatura está suspensa ou vencida.') : 'A agenda online está temporariamente indisponível.'}</p>
     <p class="mut small" style="margin-top:6px">${dono ? 'Renove para voltar a usar o sistema. Seus dados estão guardados.' : 'Entre em contato direto com o estabelecimento para marcar seu horário.'}</p>
     ${dono && sup ? `<a class="btn block" target="_blank" rel="noopener" href="https://wa.me/${sup}?text=${encodeURIComponent('Olá! Quero renovar o acesso do ' + (PUB?.config?.negocio || 'meu negócio') + ' (link /' + SLUG + ').')}">💬 Falar com o suporte</a>` : ''}
-    ${dono ? '<button class="btn ghost block" onclick="setToken(\'\');location.reload()">Sair</button>' : '<p class="small" style="margin-top:18px"><a href="/" style="color:var(--mut)">É o dono? Entrar no painel</a></p>'}`);
+    ${dono ? '<button class="btn ghost block" onclick="setToken(\'\');location.reload()">Sair</button>' : '<p class="small" style="margin-top:18px"><a href="/entrar" style="color:var(--mut)">É o dono? Entrar no painel</a></p>'}`);
 }
 
 /* ---------------- portal do assinante (página inicial) ---------------- */
@@ -189,6 +189,7 @@ function renderPortal() {
       <div class="err" id="err"></div>
       <button class="btn block">Entrar no meu painel</button>
       <p class="mut small" style="margin-top:12px">É cliente e quer agendar? Use o link que o estabelecimento enviou para você.</p>
+      <p class="small" style="margin-top:8px"><a href="/" style="color:var(--mut)">Conhecer o AgendaPro</a></p>
     </form>
   </div></div>`;
   $('#f').onsubmit = async e => {
