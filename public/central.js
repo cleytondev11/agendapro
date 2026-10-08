@@ -109,7 +109,7 @@ function render() {
     <div class="card">${lista.length ? lista.map(e => {
       const n = NICHOS[e.nicho] || {}, st = status(e);
       return `<div class="emp">
-        <div class="ic" style="background:${e.temLogo ? '#fff' : `color-mix(in srgb,${n.cor} 25%,transparent)`}">${e.temLogo ? `<img src="/m/${e.slug}.logo" alt="" style="width:100%;height:100%;object-fit:contain;border-radius:10px;padding:3px">` : n.icon || '✨'}</div>
+        <div class="ic" style="background:${e.temLogo ? 'transparent' : `color-mix(in srgb,${n.cor} 25%,transparent)`}">${e.temLogo ? `<img src="/m/${e.slug}.logo" alt="" style="width:100%;height:100%;object-fit:contain;border-radius:10px">` : n.icon || '✨'}</div>
         <div style="min-width:0">
           <div class="t">${esc(e.negocio)} <span class="pill ${st}">${STATUS_TXT[st]}</span>${e.pagInformado ? ` <span class="pill" style="background:color-mix(in srgb,#25d366 22%,transparent);color:#4ee38a">💰 informou Pix ${e.pagInformado.plano}</span>` : ''}</div>
           <div class="d">${n.label || ''} · <a href="${linkEmp(e.slug)}" target="_blank" rel="noopener">/${esc(e.slug)}</a> · usuário <b>${esc(e.login)}</b>${e.dono ? ' · ' + esc(e.dono) : ''}${e.donoTel ? ' · ' + esc(e.donoTel) : ''}${e.email && e.email !== e.login ? ' · ' + esc(e.email) : ''}${e.cnpj ? ' · CNPJ ' + esc(e.cnpj) : ''}${e.origem === 'site' ? ' · <span style="color:#b48cff">via site</span>' : ''}<br>

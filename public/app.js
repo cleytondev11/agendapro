@@ -946,7 +946,8 @@ function prepararLogo(file) {
       g.drawImage(img, (T - w) / 2, (T - h) / 2, w, h);
       URL.revokeObjectURL(url);
       let d = cv.toDataURL('image/png');
-      if (d.length > 350000) { g.globalCompositeOperation = 'destination-over'; g.fillStyle = '#fff'; g.fillRect(0, 0, T, T); d = cv.toDataURL('image/jpeg', .86); }
+      // Imagem pesada: WEBP mantém o fundo transparente (sem mancha branca) e fica bem menor.
+      if (d.length > 350000) { const w = cv.toDataURL('image/webp', .9); if (w.startsWith('data:image/webp') && w.length < d.length) d = w; }
       ok(d);
     };
     img.onerror = () => { URL.revokeObjectURL(url); ko(new Error('Não foi possível ler essa imagem.')); };
