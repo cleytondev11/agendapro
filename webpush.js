@@ -45,7 +45,10 @@ async function send(sub, payload, vapid, subject) {
     },
     body: encrypt(payload, sub)
   });
-  if (!res.ok) { const e = new Error('push ' + res.status); e.statusCode = res.status; throw e; }
+  if (!res.ok) {
+    let txt = ''; try { txt = (await res.text()).slice(0, 200); } catch { }
+    const e = new Error(`push ${res.status} ${txt}`.trim()); e.statusCode = res.status; throw e;
+  }
   return res.status;
 }
 

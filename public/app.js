@@ -148,7 +148,7 @@ async function boot() {
   if (TOKEN) { try { const r = await api('GET', '/api/me'); me = r.user; ASSIN = r.assinatura || null; } catch { } }
   if (!me) return renderLogin();
   if (me.role === 'admin') {
-    VER = -1; await pull(true); applyTheme(); startPolling();
+    VER = -1; await pull(true); applyTheme(); startPolling(); garantirPush();
     go(view && !CLI_VIEWS.includes(view) ? view : 'dashboard');
   } else {
     clearInterval(pollT);
@@ -820,9 +820,11 @@ function vConfig() {
         <div class="share"><input id="lnk" value="${esc(link)}" readonly><button class="btn sm" onclick="copiar()">Copiar</button></div>
         <div class="acts" style="margin-top:10px"><a class="btn ghost sm" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(convite)}">💬 Enviar no WhatsApp</a></div>
       </div>
-      <div class="card" style="margin-top:12px"><h3>Notificações de novos agendamentos</h3>
-        <p class="mut small">Receba um aviso no celular quando um cliente agendar ou cancelar, mesmo com o app fechado. Ative em cada aparelho que você usa.${/iPhone|iPad/.test(navigator.userAgent) ? ' No iPhone, primeiro adicione o app à Tela de Início (Compartilhar → Adicionar à Tela de Início) e abra por lá.' : ''}</p>
-        <div class="acts" style="margin-top:10px">${pushOk ? `<button class="btn sm" onclick="ativarPush()">🔔 Ativar neste aparelho</button><button class="btn ghost sm" onclick="testarPush()">Enviar teste</button>` : '<span class="mut small">Este navegador não suporta notificações.</span>'}</div>
+      <div class="card" style="margin-top:12px"><h3>🔔 Notificações de novos agendamentos</h3>
+        <p class="mut small">Aviso no celular quando um cliente agendar ou cancelar, mesmo com o app fechado. Ative em cada aparelho que você usa.</p>
+        ${(() => { const [ic, txt] = statusPush(); return `<p class="small" style="margin-top:10px">${ic} ${txt}</p>`; })()}
+        <div class="acts" style="margin-top:10px">${'PushManager' in window ? `<button class="btn sm" onclick="ativarPush()">${window.Notification?.permission === 'granted' ? 'Reativar neste aparelho' : 'Ativar neste aparelho'}</button><button class="btn ghost sm" id="btnTeste" onclick="testarPush()">Enviar teste</button>` : ''}</div>
+        <p class="small" id="pushRes" style="margin-top:10px"></p>
       </div>
       <div class="card" style="margin-top:12px"><h3>Estabelecimento</h3>
         <form id="fc">
@@ -905,20 +907,65 @@ function b64ToU8(b64) {
   const s = atob((b64 + '='.repeat((4 - b64.length % 4) % 4)).replace(/-/g, '+').replace(/_/g, '/'));
   return Uint8Array.from(s, c => c.charCodeAt(0));
 }
+function nomeAparelho() {
+  const ua = navigator.userAgent;
+  const so = /iPhone|iPad/.test(ua) ? 'iPhone' : /Android/.test(ua) ? 'Android' : /Windows/.test(ua) ? 'Windows' : /Mac/.test(ua) ? 'Mac' : 'Outro';
+  const nav = /SamsungBrowser/.test(ua) ? 'Samsung Internet' : /Edg\//.test(ua) ? 'Edge' : /Firefox/.test(ua) ? 'Firefox' : /Chrome/.test(ua) ? 'Chrome' : /Safari/.test(ua) ? 'Safari' : '';
+  return `${so}${nav ? ' · ' + nav : ''}${matchMedia('(display-mode: standalone)').matches ? ' (app)' : ''}`;
+}
+const chaveIgual = (sub, chave) => {
+  const k = sub?.options?.applicationServerKey; if (!k) return true;
+  const a = new Uint8Array(k), b = b64ToU8(chave);
+  return a.length === b.length && a.every((x, i) => x === b[i]);
+};
+// Cria (ou recria, se foi feita com outra chave) a inscrição deste aparelho e registra no servidor.
+async function inscreverAparelho() {
+  const reg = await navigator.serviceWorker.ready;
+  let sub = await reg.pushManager.getSubscription();
+  if (sub && !chaveIgual(sub, PUB.vapidPublic)) { await sub.unsubscribe().catch(() => { }); sub = null; }
+  if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToU8(PUB.vapidPublic) });
+  return api('POST', '/api/push/subscribe', { sub: sub.toJSON(), aparelho: nomeAparelho() });
+}
+// Ao abrir o painel: se a permissão já foi dada, garante silenciosamente que o servidor conhece este aparelho.
+async function garantirPush() {
+  try {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || Notification.permission !== 'granted') return;
+    await inscreverAparelho();
+  } catch (e) { console.warn('push:', e); }
+}
+function statusPush() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !window.Notification) {
+    return /iPhone|iPad/.test(navigator.userAgent)
+      ? ['⚠️', 'No iPhone, as notificações só funcionam com o app instalado: toque em Compartilhar → <b>Adicionar à Tela de Início</b>, abra pelo ícone e ative aqui (iOS 16.4 ou mais novo).']
+      : ['⚠️', 'Este navegador não suporta notificações. Use o Chrome.'];
+  }
+  if (Notification.permission === 'denied') return ['🚫', 'As notificações estão <b>bloqueadas</b> para este site. Toque no cadeado ao lado do endereço → <b>Permissões / Notificações</b> → <b>Permitir</b>, e depois toque em Ativar.'];
+  if (Notification.permission === 'granted') return ['✅', 'Ativadas neste aparelho. Toque em <b>Enviar teste</b> para conferir.'];
+  return ['🔕', 'Ainda não ativadas neste aparelho.'];
+}
 async function ativarPush() {
   try {
+    if (Notification.permission === 'denied') return alert('As notificações estão bloqueadas para este site.\n\nToque no cadeado ao lado do endereço → Permissões → Notificações → Permitir. Depois toque em Ativar de novo.');
     const perm = await Notification.requestPermission();
-    if (perm !== 'granted') return toast('Permissão de notificação negada');
-    const reg = await navigator.serviceWorker.ready;
-    let sub = await reg.pushManager.getSubscription();
-    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToU8(PUB.vapidPublic) });
-    await api('POST', '/api/push/subscribe', { sub: sub.toJSON() });
-    toast('🔔 Notificações ativadas neste aparelho');
+    if (perm !== 'granted') { toast('Permissão de notificação não concedida'); return vConfig(); }
+    const r = await inscreverAparelho();
+    toast(`🔔 Ativado! ${r.aparelhos} aparelho(s) recebendo avisos`, 3500);
+    vConfig(); setTimeout(testarPush, 800);
   } catch (e) { alert('Não foi possível ativar: ' + e.message); }
 }
 async function testarPush() {
-  try { const r = await api('POST', '/api/push/teste'); toast(r.aparelhos ? `Teste enviado para ${r.aparelhos} aparelho(s)` : 'Nenhum aparelho ativado ainda'); }
-  catch (e) { toast(e.message); }
+  const btn = $('#btnTeste'); if (btn) { btn.disabled = true; btn.textContent = 'Enviando…'; }
+  try {
+    if (Notification.permission === 'granted') await inscreverAparelho().catch(() => { });
+    const r = await api('POST', '/api/push/teste');
+    const ok = r.resultados.filter(x => x.ok).length, falha = r.resultados.filter(x => !x.ok);
+    const el = $('#pushRes');
+    const html = !r.resultados.length ? '⚠️ Nenhum aparelho ativado ainda. Toque em <b>Ativar neste aparelho</b>.'
+      : `${ok ? `✅ Enviado para ${ok} aparelho(s). A notificação deve chegar em alguns segundos.` : ''}${falha.length ? `<br>❌ ${falha.length} aparelho(s) recusaram (${esc(falha.map(f => f.aparelho || f.status).join(', '))}) e foram removidos. Toque em <b>Ativar neste aparelho</b> de novo.` : ''}
+         <br><span class="mut">Não chegou? Veja se as notificações do navegador estão permitidas nas configurações do celular e se o modo economia de bateria não está bloqueando.</span>`;
+    if (el) el.innerHTML = html; else toast(ok ? 'Teste enviado' : 'Falhou', 3000);
+  } catch (e) { toast(e.message); }
+  if (btn) { btn.disabled = false; btn.textContent = 'Enviar teste'; }
 }
 
 /* ================= CLIENTE ================= */

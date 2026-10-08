@@ -162,14 +162,18 @@ function slotsLivres(E, data, profId, duracao) {
   return out;
 }
 
-function pushAdmins(E, title, body) {
+// Envia para todos os aparelhos do dono. Remove inscrições mortas (404/410) ou feitas com outra chave (401/403).
+async function pushAdmins(E, title, body) {
   const payload = JSON.stringify({ title, body, url: '/' + E.meta.slug });
-  for (const s of [...E.pushSubs]) {
-    webpush.send(s.sub, payload, META.vapid, PUSH_SUBJECT).catch(err => {
-      if (err.statusCode === 404 || err.statusCode === 410) { E.pushSubs = E.pushSubs.filter(x => x !== s); salvar(E); }
-      else console.warn('Falha no push:', err.message);
-    });
-  }
+  const subs = [...E.pushSubs];
+  const res = await Promise.all(subs.map(s => webpush.send(s.sub, payload, META.vapid, PUSH_SUBJECT)
+    .then(() => ({ ok: true, aparelho: s.aparelho || '' }))
+    .catch(err => ({ ok: false, aparelho: s.aparelho || '', status: err.statusCode || 0, erro: err.message, sub: s }))));
+  const mortas = res.filter(r => !r.ok && [401, 403, 404, 410].includes(r.status)).map(r => r.sub);
+  if (mortas.length) { E.pushSubs = E.pushSubs.filter(x => !mortas.includes(x)); salvar(E); }
+  res.filter(r => !r.ok).forEach(r => console.warn(`[push ${E.meta.slug}] falhou (${r.status}):`, r.erro));
+  E.meta.ultimoPush = { em: new Date().toISOString(), enviados: res.filter(r => r.ok).length, falhas: res.filter(r => !r.ok).length };
+  return res.map(({ sub, ...r }) => r);
 }
 
 /* ----- proteção de login ----- */
@@ -338,10 +342,17 @@ route('POST', T + '/push/subscribe', 'admin', (req, b) => {
   const E = req.E;
   if (!b.sub?.endpoint || !b.sub?.keys?.p256dh) fail(400, 'Inscrição inválida.');
   E.pushSubs = E.pushSubs.filter(s => s.sub.endpoint !== b.sub.endpoint);
-  E.pushSubs.push({ uid: req.user.id, sub: b.sub, em: new Date().toISOString() });
-  salvar(E); return { ok: true };
+  E.pushSubs.push({ uid: req.user.id, sub: b.sub, em: new Date().toISOString(), aparelho: str(b.aparelho, 60) });
+  if (E.pushSubs.length > 20) E.pushSubs = E.pushSubs.slice(-20);
+  salvar(E); return { ok: true, aparelhos: E.pushSubs.length };
 });
-route('POST', T + '/push/teste', 'admin', req => { pushAdmins(req.E, '🔔 Teste', 'As notificações estão funcionando!'); return { ok: true, aparelhos: req.E.pushSubs.length }; });
+route('POST', T + '/push/teste', 'admin', async req => {
+  const resultados = await pushAdmins(req.E, '🔔 Teste do AgendaPro', 'Notificações funcionando! Você será avisado a cada novo agendamento.');
+  return { resultados, aparelhos: req.E.pushSubs.length };
+});
+route('POST', T + '/push/remover', 'admin', (req, b) => {
+  req.E.pushSubs = req.E.pushSubs.filter(s => s.sub.endpoint !== b.endpoint); salvar(req.E); return { ok: true };
+});
 route('GET', T + '/backup', 'admin', req => {
   const d = { config: req.E.config, backupEm: new Date().toISOString() };
   for (const c of COLS) d[c] = req.E[c];
@@ -379,7 +390,8 @@ function resumo(E) {
     clientes: E.users.filter(u => u.role === 'cliente').length,
     agMes: E.agendamentos.filter(a => (a.data || '').startsWith(mes) && a.status !== 'cancelado').length,
     agApp: E.agendamentos.filter(a => (a.data || '').startsWith(mes) && a.criadoPor === 'cliente').length,
-    ultimoUso: E.agendamentos.map(a => a.criadoEm || '').sort().pop()?.slice(0, 10) || ''
+    ultimoUso: E.agendamentos.map(a => a.criadoEm || '').sort().pop()?.slice(0, 10) || '',
+    aparelhosPush: E.pushSubs.length
   };
 }
 route('GET', '/api/central/empresas', 'central', () => ({ hoje: hojeSP(), suporte: SUPORTE, empresas: Object.values(EMP).map(resumo).sort((a, b) => a.negocio.localeCompare(b.negocio)) }));

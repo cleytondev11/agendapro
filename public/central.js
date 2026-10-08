@@ -109,7 +109,7 @@ function render() {
         <div style="min-width:0">
           <div class="t">${esc(e.negocio)} <span class="pill ${st}">${STATUS_TXT[st]}</span></div>
           <div class="d">${n.label || ''} · <a href="${linkEmp(e.slug)}" target="_blank" rel="noopener">/${esc(e.slug)}</a> · usuário <b>${esc(e.login)}</b>${e.dono ? ' · ' + esc(e.dono) : ''}${e.donoTel ? ' · ' + esc(e.donoTel) : ''}<br>
-            ${e.vence ? `vence ${fmtData(e.vence)}${e.situacao === 'ativa' ? ` (${diasAte(e.vence)} dias)` : ''}` : 'sem vencimento'} · ${brl(e.valor)}/mês · ${e.clientes} clientes · ${e.agMes} agend. no mês${e.obs ? ' · ' + esc(e.obs) : ''}</div>
+            ${e.vence ? `vence ${fmtData(e.vence)}${e.situacao === 'ativa' ? ` (${diasAte(e.vence)} dias)` : ''}` : 'sem vencimento'} · ${brl(e.valor)}/mês · ${e.clientes} clientes · ${e.agMes} agend. no mês · ${e.aparelhosPush ? `🔔 ${e.aparelhosPush} aparelho(s)` : '🔕 sem notificação'}${e.obs ? ' · ' + esc(e.obs) : ''}</div>
         </div>
         <div class="acts">
           <button class="btn ok sm" onclick="renovar('${e.slug}')">Renovar</button>
