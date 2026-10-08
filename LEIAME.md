@@ -1,22 +1,39 @@
-# AgendaPro Beleza — agendamento online
+# AgendaPro Beleza — agendamento online (multiempresa)
 
 Barbearia · Lash (extensão de cílios) · Manicure & Pedicure · Salão / Cabeleireira
 
-O **cliente agenda pelo celular dele, de casa**, e o horário aparece **na hora** no painel do dono, com som, aviso na tela e notificação no celular (mesmo com o app fechado).
+Você vende acessos. Cada assinante ganha **um link próprio** (ex.: `seusite.com/barbearia-do-joao`), com dados totalmente separados.
+Os clientes dele agendam por esse link, de casa, e o horário aparece na hora no painel do assinante.
 
-```
-Cliente (celular dele)  ──►  SERVIDOR (este projeto)  ◄──  Dono (painel)
-   cria conta, agenda          guarda tudo num só lugar       vê agenda, financeiro,
-   vê / cancela horários       avisa o dono (push)            estoque, compras, vendas
-```
+| Endereço | Quem usa |
+|---|---|
+| `/central` | **Só você.** Cria, renova, bloqueia e exclui assinantes |
+| `/` | Assinante entra com usuário e senha e cai no painel dele |
+| `/nome-do-negocio` | Link do assinante: painel dele e agendamento dos clientes dele |
+
+## Central de Acessos (/central)
+Login definido por variáveis de ambiente no Render:
+
+| Variável | Exemplo |
+|---|---|
+| `CENTRAL_USUARIO` | `cleyton` (se não definir, é `admin`) |
+| `CENTRAL_SENHA` | uma senha forte só sua — **obrigatória** |
+| `SUPORTE_WHATSAPP` | `5561999999999` (aparece para assinantes vencidos/bloqueados) |
+
+Na Central você:
+- **+ Novo assinante:** nome do negócio, **nicho**, link, dono, WhatsApp, **usuário**, **senha** (botão 🎲 gera uma), vencimento e valor mensal. Ao criar, aparece a **mensagem de boas-vindas** pronta para enviar no WhatsApp.
+- **Renovar:** +30/90/180/365 dias (soma ao vencimento atual; se estava vencido/bloqueado, libera na hora).
+- **Editar:** nome, nicho, usuário, vencimento, valor, observação.
+- **⋯** : redefinir senha, cobrar no WhatsApp, bloquear/desbloquear, baixar backup, excluir.
+- Vencido ou bloqueado: o painel do assinante e a agenda online ficam suspensos (os dados continuam guardados). Faltando 5 dias, o assinante vê um aviso para renovar.
 
 ## Rodar no seu PC (teste)
 Precisa do **Node.js 18 ou mais novo**. Nenhum pacote para instalar.
 ```
 node server.js
 ```
-Abra `http://localhost:3000`. No primeiro acesso você escolhe o nicho e cria o login do administrador.
-Os dados ficam em `data/db.json`.
+Defina a senha da Central antes de iniciar (variável `CENTRAL_SENHA`) e abra `http://localhost:3000/central`.
+Os dados ficam na pasta `data/`.
 
 ## Publicar na internet (para os clientes acessarem)
 O app precisa estar em um endereço **https://** para instalar no celular e mandar notificações.
@@ -27,7 +44,7 @@ O app precisa estar em um endereço **https://** para instalar no celular e mand
 3. Em **render.com** → *New → Web Service* → escolha o repositório.
    - Build command: `npm install`
    - Start command: `node server.js`
-   - Environment → adicione `DATABASE_URL` = a connection string do Neon
+   - Environment → `DATABASE_URL` (connection string do Neon), `CENTRAL_SENHA`, `CENTRAL_USUARIO` e `SUPORTE_WHATSAPP`
    - (opcional) `PUSH_EMAIL` = seu e-mail
 4. O Render dá um endereço tipo `https://sua-barbearia.onrender.com`. Pronto.
 
@@ -35,20 +52,24 @@ O app precisa estar em um endereço **https://** para instalar no celular e mand
 
 ### Opção B — VPS / servidor próprio
 `node server.js` (use `pm2` ou um serviço do sistema para manter ligado) atrás de um HTTPS (Nginx + Let's Encrypt, ou Cloudflare).
-Sem `DATABASE_URL`, os dados ficam em `data/db.json`. Defina `DATA_DIR` para mudar a pasta e faça backup dela.
+Sem `DATABASE_URL`, os dados ficam na pasta `data/`. Defina `DATA_DIR` para mudar a pasta e faça backup dela.
 
 | Variável | Para quê |
 |---|---|
 | `PORT` | porta (padrão 3000; Render define sozinho) |
 | `DATABASE_URL` | usar PostgreSQL em vez do arquivo |
-| `DATA_DIR` | pasta do `db.json` quando não usar PostgreSQL |
+| `DATA_DIR` | pasta dos dados quando não usar PostgreSQL |
+| `CENTRAL_USUARIO` / `CENTRAL_SENHA` | login da Central |
+| `SUPORTE_WHATSAPP` | seu WhatsApp de suporte (55 + DDD + número) |
 | `PUSH_EMAIL` | e-mail de contato nas notificações push |
 
-## Depois de publicar
-1. Entre como administrador → **Ajustes**.
-2. **Ativar notificações neste aparelho** (no iPhone: antes adicione o app à Tela de Início, iOS 16.4+).
-3. Copie o **link de agendamento** ou toque em **Enviar no WhatsApp** e mande para seus clientes / coloque no Instagram.
-4. Cliente abre o link → **Criar conta** (nome, telefone, senha) → escolhe serviço, profissional, dia e horário → confirma.
+## Vendeu um acesso? Passo a passo
+1. Entre em `/central` → **+ Novo assinante**.
+2. Preencha nome do negócio, escolha o **nicho**, usuário, senha e vencimento → **Criar acesso**.
+3. Toque em **Enviar no WhatsApp** — o comprador recebe link, usuário e senha.
+4. O assinante entra, vai em **Ajustes → Ativar notificações** e manda o link dele para os clientes.
+
+> Se você já tinha configurado uma empresa na versão anterior, ela é migrada automaticamente e aparece na Central (sem vencimento).
 
 ## Funções
 - **Cliente:** cadastro com telefone e senha, agendamento só em horários realmente livres (o servidor confere e bloqueia horário duplicado), meus horários, cancelar, perfil. Limite de 5 horários futuros por cliente.
@@ -61,6 +82,8 @@ Sem `DATABASE_URL`, os dados ficam em `data/db.json`. Defina `DATA_DIR` para mud
 - Bloqueio de 15 minutos após 10 tentativas de login erradas.
 
 ## Arquivos
-- `server.js` — servidor e API
+- `server.js` — servidor e API (multiempresa)
 - `webpush.js` — notificações push (sem bibliotecas externas)
-- `public/` — o app (PWA): `index.html`, `app.js`, `style.css`, `sw.js`, `manifest.json`, ícones
+- `public/` — o app (PWA): `index.html`, `app.js`, `style.css`, `sw.js`, ícones
+- `public/central.html` + `central.js` — a Central de Acessos
+- `public/nichos.js` — serviços e produtos padrão de cada nicho

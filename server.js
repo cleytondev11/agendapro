@@ -1,60 +1,107 @@
-// AgendaPro Beleza — servidor (Node.js 18+, sem dependências obrigatórias).
-// Dados: arquivo data/db.json (padrão) ou PostgreSQL se a variável DATABASE_URL existir.
+// AgendaPro Beleza — servidor multiempresa (Node.js 18+).
+// Cada empresa assinante tem link próprio (/nome-do-negocio) e dados separados.
+// A Central (/central) cria e gerencia os acessos. Login dela vem das variáveis CENTRAL_USUARIO e CENTRAL_SENHA.
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const webpush = require('./webpush');
+const NICHOS = require('./public/nichos.js');
 
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const DB_URL = process.env.DATABASE_URL;
 const PUSH_SUBJECT = process.env.PUSH_EMAIL ? 'mailto:' + process.env.PUSH_EMAIL : 'mailto:contato@agendapro.app';
+const CENTRAL_USUARIO = (process.env.CENTRAL_USUARIO || 'admin').trim().toLowerCase();
+const CENTRAL_SENHA = process.env.CENTRAL_SENHA || '';
+const SUPORTE = String(process.env.SUPORTE_WHATSAPP || '').replace(/\D/g, '');
+const TZ_PADRAO = 'America/Sao_Paulo';
 const PUBLIC = path.join(__dirname, 'public');
 const COLS = ['users', 'profissionais', 'servicos', 'produtos', 'agendamentos', 'compras', 'vendas', 'lancamentos'];
+const RESERVADOS = new Set(['api', 'central', 'm', 'icons', 'assets', 'static', 'admin', 'login', 'sw.js', 'manifest.json']);
 
-/* ---------------- armazenamento ---------------- */
-let DB, pool;
-const blank = () => ({ config: null, users: [], profissionais: [], servicos: [], produtos: [], agendamentos: [], compras: [], vendas: [], lancamentos: [], sessions: {}, pushSubs: [], vapid: null, version: 1 });
+/* ================= armazenamento ================= */
+// meta: { vapid, sessions (da Central) } · empresas: { [slug]: dados da empresa }
+let META = { vapid: null, sessions: {} };
+const EMP = {};
+let pool;
+
+const blankEmp = () => ({ meta: {}, config: null, users: [], profissionais: [], servicos: [], produtos: [], agendamentos: [], compras: [], vendas: [], lancamentos: [], sessions: {}, pushSubs: [], version: 1 });
 
 async function loadDB() {
   if (DB_URL) {
-    const { Pool } = require('pg'); // npm install pg (só quando usar PostgreSQL)
+    const { Pool } = require('pg');
     pool = new Pool({ connectionString: DB_URL, ssl: /localhost|127\.0\.0\.1/.test(DB_URL) ? false : { rejectUnauthorized: false } });
     await pool.query('CREATE TABLE IF NOT EXISTS agendapro (id TEXT PRIMARY KEY, data JSONB NOT NULL)');
-    const r = await pool.query("SELECT data FROM agendapro WHERE id='main'");
-    DB = Object.assign(blank(), r.rows[0]?.data || {});
-    console.log('Banco: PostgreSQL');
+    const r = await pool.query('SELECT id, data FROM agendapro');
+    for (const row of r.rows) {
+      if (row.id === 'meta') META = Object.assign(META, row.data);
+      else if (row.id.startsWith('t:')) EMP[row.id.slice(2)] = Object.assign(blankEmp(), row.data);
+      else if (row.id === 'main') var legado = row.data;
+    }
+    if (legado && !META.migrado) migrarLegado(legado);
+    console.log('Banco: PostgreSQL ·', Object.keys(EMP).length, 'empresa(s)');
   } else {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-    const f = path.join(DATA_DIR, 'db.json');
-    DB = Object.assign(blank(), fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : {});
-    console.log('Banco: arquivo', f);
+    fs.mkdirSync(path.join(DATA_DIR, 'empresas'), { recursive: true });
+    const fm = path.join(DATA_DIR, 'meta.json');
+    if (fs.existsSync(fm)) META = Object.assign(META, JSON.parse(fs.readFileSync(fm, 'utf8')));
+    for (const f of fs.readdirSync(path.join(DATA_DIR, 'empresas')).filter(f => f.endsWith('.json')))
+      EMP[f.slice(0, -5)] = Object.assign(blankEmp(), JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'empresas', f), 'utf8')));
+    const old = path.join(DATA_DIR, 'db.json');
+    if (fs.existsSync(old) && !META.migrado) migrarLegado(JSON.parse(fs.readFileSync(old, 'utf8')));
+    console.log('Banco: arquivos em', DATA_DIR, '·', Object.keys(EMP).length, 'empresa(s)');
   }
-  if (!DB.vapid) { DB.vapid = webpush.generateVapidKeys(); await flush(); }
+  if (!META.vapid) { META.vapid = webpush.generateVapidKeys(); marcar('meta'); }
+  if (!CENTRAL_SENHA) console.warn('⚠️  Defina a variável CENTRAL_SENHA para usar a Central (/central).');
+  await flush();
 }
 
-let writing = false, dirty = false;
+// Converte o banco da versão de empresa única para a primeira empresa da Central.
+function migrarLegado(d) {
+  META.migrado = true; marcar('meta');
+  if (!d?.config || !Array.isArray(d.users)) return;
+  if (d.vapid) META.vapid = d.vapid;
+  const slug = slugLivre(d.config.negocio || 'minha-empresa');
+  const e = Object.assign(blankEmp(), d);
+  delete e.vapid;
+  e.meta = { slug, criado: hojeSP(), vence: '', bloqueado: false, valor: 0, donoTel: '', obs: 'Migrada da versão anterior' };
+  e.pushSubs = [];
+  EMP[slug] = e; marcar('t:' + slug);
+  console.log('Empresa existente migrada para /' + slug);
+}
+
+const sujos = new Set();
+let writing = false;
+function marcar(key) { sujos.add(key); }
 async function flush() {
-  if (writing) { dirty = true; return; }
+  if (writing) return;
   writing = true;
   try {
-    do {
-      dirty = false;
-      const json = JSON.stringify(DB);
-      if (pool) await pool.query("INSERT INTO agendapro (id, data) VALUES ('main', $1) ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data", [json]);
-      else { const f = path.join(DATA_DIR, 'db.json'); fs.writeFileSync(f + '.tmp', json); fs.renameSync(f + '.tmp', f); }
-    } while (dirty);
+    while (sujos.size) {
+      const key = sujos.values().next().value; sujos.delete(key);
+      const slug = key.startsWith('t:') ? key.slice(2) : null;
+      const data = key === 'meta' ? META : EMP[slug];
+      if (pool) {
+        if (data) await pool.query('INSERT INTO agendapro (id, data) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data', [key, JSON.stringify(data)]);
+        else await pool.query('DELETE FROM agendapro WHERE id = $1', [key]);
+      } else {
+        const f = key === 'meta' ? path.join(DATA_DIR, 'meta.json') : path.join(DATA_DIR, 'empresas', slug + '.json');
+        if (data) { fs.writeFileSync(f + '.tmp', JSON.stringify(data)); fs.renameSync(f + '.tmp', f); }
+        else if (fs.existsSync(f)) fs.unlinkSync(f);
+      }
+    }
   } catch (e) { console.error('Erro ao salvar dados:', e); }
-  finally { writing = false; }
+  finally { writing = false; if (sujos.size) setTimeout(flush, 500); }
 }
-function changed() { DB.version++; flush(); }
+function changed(E) { E.version++; marcar('t:' + E.meta.slug); flush(); }
+function salvar(E) { marcar('t:' + E.meta.slug); flush(); }
 
-/* ---------------- utilidades ---------------- */
+/* ================= utilidades ================= */
 const uid = () => Date.now().toString(36) + crypto.randomBytes(4).toString('hex');
 const digits = s => String(s || '').replace(/\D/g, '');
 const str = (s, max = 200) => String(s ?? '').trim().slice(0, max);
 const n = v => Number.isFinite(+v) ? +v : 0;
+const isoData = s => /^\d{4}-\d{2}-\d{2}$/.test(s);
 
 function hashPw(pw) { const salt = crypto.randomBytes(16).toString('hex'); return salt + ':' + crypto.scryptSync(String(pw), salt, 64).toString('hex'); }
 function checkPw(pw, h) {
@@ -62,26 +109,49 @@ function checkPw(pw, h) {
   const [salt, k] = h.split(':'); const a = Buffer.from(k, 'hex'), b = crypto.scryptSync(String(pw), salt, 64);
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
+function igual(a, b) { const x = crypto.createHash('sha256').update(String(a)).digest(), y = crypto.createHash('sha256').update(String(b)).digest(); return crypto.timingSafeEqual(x, y); }
 const pubUser = ({ senha, ...u }) => ({ ...u, hasSenha: !!senha });
-const isConfigured = () => !!DB.config && DB.users.some(u => u.role === 'admin');
 
 function agora(tz) {
-  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: tz || 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: tz || TZ_PADRAO, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
     .formatToParts(new Date()).map(x => [x.type, x.value]));
   return { data: `${p.year}-${p.month}-${p.day}`, min: (+p.hour % 24) * 60 + +p.minute };
 }
+const hojeSP = () => agora(TZ_PADRAO).data;
+function somaDias(data, dias) { const d = new Date((isoData(data) ? data : hojeSP()) + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + dias); return d.toISOString().slice(0, 10); }
 const toMin = h => { const [a, b] = String(h).split(':').map(Number); return a * 60 + b; };
 const toHora = m => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+const fmtData = s => String(s).split('-').reverse().join('/');
 
-function slotsLivres(data, profId, duracao) {
-  const c = DB.config;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(data)) return [];
+function slugify(s) {
+  return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'empresa';
+}
+function slugLivre(nome) {
+  const base = slugify(nome); let s = base, i = 2;
+  while (EMP[s] || RESERVADOS.has(s)) s = `${base}-${i++}`;
+  return s;
+}
+function loginEmUso(login, excetoSlug, excetoId) {
+  for (const [slug, E] of Object.entries(EMP))
+    if (E.users.some(u => u.role === 'admin' && u.login === login && !(slug === excetoSlug && u.id === excetoId))) return true;
+  return false;
+}
+
+function situacao(E) {
+  if (E.meta.bloqueado) return 'bloqueada';
+  if (E.meta.vence && hojeSP() > E.meta.vence) return 'vencida';
+  return 'ativa';
+}
+
+function slotsLivres(E, data, profId, duracao) {
+  const c = E.config;
+  if (!isoData(data)) return [];
   const dow = new Date(data + 'T12:00:00Z').getUTCDay();
   if (!c.dias.includes(dow)) return [];
   const now = agora(c.tz);
-  if (data < now.data) return [];
+  if (data < now.data || data > somaDias(now.data, 90)) return [];
   const ini = toMin(c.abre), fim = toMin(c.fecha), passo = Number(c.intervalo) || 30;
-  const ocup = DB.agendamentos.filter(a => a.data === data && a.profId === profId && a.status !== 'cancelado')
+  const ocup = E.agendamentos.filter(a => a.data === data && a.profId === profId && a.status !== 'cancelado')
     .map(a => [toMin(a.hora), toMin(a.hora) + (a.duracao || 30)]);
   const out = [];
   for (let t = ini; t + duracao <= fim; t += passo) {
@@ -92,139 +162,149 @@ function slotsLivres(data, profId, duracao) {
   return out;
 }
 
-function pushAdmins(title, body) {
-  const payload = JSON.stringify({ title, body, url: '/' });
-  for (const s of [...DB.pushSubs]) {
-    webpush.send(s.sub, payload, DB.vapid, PUSH_SUBJECT).catch(err => {
-      if (err.statusCode === 404 || err.statusCode === 410) { DB.pushSubs = DB.pushSubs.filter(x => x !== s); flush(); }
+function pushAdmins(E, title, body) {
+  const payload = JSON.stringify({ title, body, url: '/' + E.meta.slug });
+  for (const s of [...E.pushSubs]) {
+    webpush.send(s.sub, payload, META.vapid, PUSH_SUBJECT).catch(err => {
+      if (err.statusCode === 404 || err.statusCode === 410) { E.pushSubs = E.pushSubs.filter(x => x !== s); salvar(E); }
       else console.warn('Falha no push:', err.message);
     });
   }
 }
-const fmtData = s => s.split('-').reverse().join('/');
 
-/* ---------------- proteção de login ---------------- */
+/* ----- proteção de login ----- */
 const tentativas = new Map();
 function bloqueado(ip) { const t = tentativas.get(ip); return t && t.n >= 10 && Date.now() - t.t < 15 * 60e3; }
 function falhou(ip) { const t = tentativas.get(ip); if (!t || Date.now() - t.t > 15 * 60e3) tentativas.set(ip, { n: 1, t: Date.now() }); else t.n++; }
 
-function novaSessao(user) {
-  const token = crypto.randomBytes(32).toString('hex');
-  const agoraMs = Date.now();
-  for (const [k, s] of Object.entries(DB.sessions)) if (s.exp < agoraMs) delete DB.sessions[k];
-  DB.sessions[token] = { uid: user.id, exp: agoraMs + 90 * 864e5 };
-  flush();
+function novaSessao(store, uidv) {
+  const token = crypto.randomBytes(32).toString('hex'), agoraMs = Date.now();
+  for (const [k, s] of Object.entries(store)) if (s.exp < agoraMs) delete store[k];
+  store[token] = { uid: uidv, exp: agoraMs + 90 * 864e5 };
   return token;
 }
 
-/* ---------------- rotas ---------------- */
+/* ================= rotas ================= */
 const routes = [];
+// auth: null | 'any' | 'admin' (da empresa) | 'central'
 const route = (method, pattern, auth, fn) => routes.push({ method, re: new RegExp('^' + pattern.replace(/:(\w+)/g, '(?<$1>[^/]+)') + '$'), auth, fn });
 class HttpErr extends Error { constructor(status, msg) { super(msg); this.status = status; } }
 const fail = (status, msg) => { throw new HttpErr(status, msg); };
+const T = '/api/t/:slug';
 
-route('GET', '/api/public', null, () => ({
-  configured: isConfigured(),
-  config: DB.config ? { negocio: DB.config.negocio, nicho: DB.config.nicho, abre: DB.config.abre, fecha: DB.config.fecha, intervalo: DB.config.intervalo, dias: DB.config.dias, tz: DB.config.tz } : null,
-  servicos: DB.servicos.filter(s => s.ativo !== false).map(({ id, nome, preco, duracao }) => ({ id, nome, preco, duracao })),
-  profissionais: DB.profissionais.filter(p => p.ativo !== false).map(({ id, nome }) => ({ id, nome })),
-  vapidPublic: DB.vapid?.publicKey
-}));
-
-route('POST', '/api/setup', null, (req, b) => {
-  if (isConfigured()) fail(403, 'O sistema já foi configurado.');
-  if (!str(b.login) || String(b.senha || '').length < 4) fail(400, 'Informe usuário e senha (mínimo 4 caracteres).');
-  const keep = { vapid: DB.vapid, sessions: {}, pushSubs: [] };
-  DB = Object.assign(blank(), keep);
-  DB.config = { negocio: str(b.negocio, 80) || 'Meu negócio', nicho: str(b.nicho, 30), abre: '09:00', fecha: '19:00', intervalo: 30, dias: [1, 2, 3, 4, 5, 6], tz: str(b.tz, 60) || 'America/Sao_Paulo' };
-  const admin = { id: uid(), nome: str(b.nome, 80), login: str(b.login, 60).toLowerCase(), senha: hashPw(b.senha), role: 'admin', tel: '', criado: agora(DB.config.tz).data };
-  DB.users.push(admin);
-  DB.profissionais.push({ id: uid(), nome: admin.nome, ativo: true });
-  DB.servicos = (Array.isArray(b.servicos) ? b.servicos : []).slice(0, 50).map(s => ({ id: uid(), nome: str(s.nome, 80), preco: n(s.preco), duracao: n(s.duracao) || 30, ativo: true }));
-  DB.produtos = (Array.isArray(b.produtos) ? b.produtos : []).slice(0, 50).map(p => ({ id: uid(), nome: str(p.nome, 80), custo: n(p.custo), preco: n(p.preco), qtd: n(p.qtd), min: n(p.min) }));
-  changed();
-  return { token: novaSessao(admin), user: pubUser(admin) };
+/* ----- portal do assinante (login sem saber o link) ----- */
+route('POST', '/api/login-dono', null, (req, b) => {
+  if (bloqueado(req.ip)) fail(429, 'Muitas tentativas. Aguarde 15 minutos.');
+  const login = str(b.login).toLowerCase();
+  for (const E of Object.values(EMP)) {
+    const u = E.users.find(u => u.role === 'admin' && u.login === login);
+    if (u && checkPw(b.senha, u.senha)) {
+      if (situacao(E) !== 'ativa') fail(403, 'Acesso suspenso. Fale com o suporte para renovar.');
+      const token = novaSessao(E.sessions, u.id); salvar(E);
+      return { slug: E.meta.slug, token };
+    }
+  }
+  falhou(req.ip); fail(401, 'Usuário ou senha incorretos.');
 });
 
-route('POST', '/api/login', null, (req, b) => {
+/* ----- empresa: público ----- */
+route('GET', T + '/public', 'empresa', req => {
+  const E = req.E, sit = situacao(E);
+  return {
+    configured: true, situacao: sit, suporte: SUPORTE,
+    config: { negocio: E.config.negocio, nicho: E.config.nicho, abre: E.config.abre, fecha: E.config.fecha, intervalo: E.config.intervalo, dias: E.config.dias, tz: E.config.tz },
+    servicos: sit === 'ativa' ? E.servicos.filter(s => s.ativo !== false).map(({ id, nome, preco, duracao }) => ({ id, nome, preco, duracao })) : [],
+    profissionais: sit === 'ativa' ? E.profissionais.filter(p => p.ativo !== false).map(({ id, nome }) => ({ id, nome })) : [],
+    vapidPublic: META.vapid?.publicKey
+  };
+});
+
+route('POST', T + '/login', 'empresa', (req, b) => {
+  const E = req.E;
   if (bloqueado(req.ip)) fail(429, 'Muitas tentativas. Aguarde 15 minutos.');
   const login = str(b.login).toLowerCase(), tel = digits(login);
-  const u = DB.users.find(u => u.login === login || (tel.length >= 10 && u.login === tel));
+  const u = E.users.find(u => u.login === login || (tel.length >= 10 && u.login === tel));
   if (!u || !checkPw(b.senha, u.senha)) { falhou(req.ip); fail(401, 'Usuário ou senha incorretos.'); }
   if (u.bloqueado) fail(403, 'Acesso bloqueado. Fale com o estabelecimento.');
-  return { token: novaSessao(u), user: pubUser(u) };
+  const token = novaSessao(E.sessions, u.id); salvar(E);
+  return { token, user: pubUser(u) };
 });
 
-route('POST', '/api/register', null, (req, b) => {
-  if (!isConfigured()) fail(400, 'Sistema ainda não configurado.');
+route('POST', T + '/register', 'empresa', (req, b) => {
+  const E = req.E;
   const tel = digits(b.tel), nome = str(b.nome, 80);
   if (!nome) fail(400, 'Informe seu nome.');
   if (tel.length < 10 || tel.length > 13) fail(400, 'Informe um telefone com DDD.');
   if (String(b.senha || '').length < 4) fail(400, 'A senha precisa ter pelo menos 4 caracteres.');
-  let u = DB.users.find(u => u.login === tel);
-  if (u && u.senha) fail(409, 'Já existe uma conta com esse telefone. Use a aba Entrar.');
+  let u = E.users.find(u => u.login === tel);
+  if (u && (u.senha || u.role === 'admin')) fail(409, 'Já existe uma conta com esse telefone. Use a aba Entrar.');
   if (u) { u.senha = hashPw(b.senha); u.nome = nome; }
-  else { u = { id: uid(), nome, login: tel, tel: str(b.tel, 30), senha: hashPw(b.senha), role: 'cliente', criado: agora(DB.config.tz).data }; DB.users.push(u); }
-  changed();
-  return { token: novaSessao(u), user: pubUser(u) };
+  else { u = { id: uid(), nome, login: tel, tel: str(b.tel, 30), senha: hashPw(b.senha), role: 'cliente', criado: agora(E.config.tz).data }; E.users.push(u); }
+  const token = novaSessao(E.sessions, u.id);
+  changed(E);
+  return { token, user: pubUser(u) };
 });
 
-route('POST', '/api/logout', 'any', req => { delete DB.sessions[req.token]; flush(); return { ok: true }; });
-route('GET', '/api/me', 'any', req => ({ user: pubUser(req.user) }));
-route('PUT', '/api/me', 'any', (req, b) => {
+route('POST', T + '/logout', 'any', req => { delete req.E.sessions[req.token]; salvar(req.E); return { ok: true }; });
+route('GET', T + '/me', 'any', req => ({ user: pubUser(req.user), assinatura: req.user.role === 'admin' ? { vence: req.E.meta.vence || '' } : undefined }));
+route('PUT', T + '/me', 'any', (req, b) => {
   if (str(b.nome)) req.user.nome = str(b.nome, 80);
   if (b.senha) { if (String(b.senha).length < 4) fail(400, 'Senha muito curta.'); req.user.senha = hashPw(b.senha); }
-  changed(); return { user: pubUser(req.user) };
+  changed(req.E); return { user: pubUser(req.user) };
 });
 
-/* ----- cliente ----- */
-route('GET', '/api/slots', 'any', req => {
-  const q = req.query, sv = DB.servicos.find(s => s.id === q.get('servicoId') && s.ativo !== false);
+/* ----- empresa: cliente ----- */
+route('GET', T + '/slots', 'any', req => {
+  const E = req.E, q = req.query, sv = E.servicos.find(s => s.id === q.get('servicoId') && s.ativo !== false);
   if (!sv) fail(400, 'Serviço inválido.');
-  return { slots: slotsLivres(q.get('data'), q.get('profId'), sv.duracao) };
+  return { slots: slotsLivres(E, q.get('data'), q.get('profId'), sv.duracao) };
 });
-route('POST', '/api/agendar', 'any', (req, b) => {
-  const sv = DB.servicos.find(s => s.id === b.servicoId && s.ativo !== false);
-  const pr = DB.profissionais.find(p => p.id === b.profId && p.ativo !== false);
+route('POST', T + '/agendar', 'any', (req, b) => {
+  const E = req.E;
+  const sv = E.servicos.find(s => s.id === b.servicoId && s.ativo !== false);
+  const pr = E.profissionais.find(p => p.id === b.profId && p.ativo !== false);
   if (!sv || !pr) fail(400, 'Serviço ou profissional inválido.');
-  const ativos = DB.agendamentos.filter(a => a.clienteId === req.user.id && a.status === 'agendado' && a.data >= agora(DB.config.tz).data);
+  const ativos = E.agendamentos.filter(a => a.clienteId === req.user.id && a.status === 'agendado' && a.data >= agora(E.config.tz).data);
   if (req.user.role === 'cliente' && ativos.length >= 5) fail(400, 'Você já tem 5 horários marcados. Cancele algum para marcar outro.');
-  if (!slotsLivres(b.data, pr.id, sv.duracao).includes(b.hora)) fail(409, 'Esse horário acabou de ser ocupado. Escolha outro.');
+  if (!slotsLivres(E, b.data, pr.id, sv.duracao).includes(b.hora)) fail(409, 'Esse horário acabou de ser ocupado. Escolha outro.');
   const a = { id: uid(), status: 'agendado', criadoPor: 'cliente', criadoEm: new Date().toISOString(), clienteId: req.user.id, clienteNome: req.user.nome, tel: req.user.tel, servicoId: sv.id, servicoNome: sv.nome, valor: sv.preco, duracao: sv.duracao, profId: pr.id, data: b.data, hora: b.hora, obs: str(b.obs, 200) };
-  DB.agendamentos.push(a);
-  changed();
-  pushAdmins('📅 Novo agendamento', `${a.clienteNome} — ${a.servicoNome}\n${fmtData(a.data)} às ${a.hora}`);
+  E.agendamentos.push(a);
+  changed(E);
+  pushAdmins(E, '📅 Novo agendamento', `${a.clienteNome} — ${a.servicoNome}\n${fmtData(a.data)} às ${a.hora}`);
   return { agendamento: a };
 });
-route('GET', '/api/meus', 'any', req => ({ agendamentos: DB.agendamentos.filter(a => a.clienteId === req.user.id) }));
-route('POST', '/api/meus/:id/cancelar', 'any', (req, b, p) => {
-  const a = DB.agendamentos.find(a => a.id === p.id && a.clienteId === req.user.id);
+route('GET', T + '/meus', 'any', req => ({ agendamentos: req.E.agendamentos.filter(a => a.clienteId === req.user.id) }));
+route('POST', T + '/meus/:id/cancelar', 'any', (req, b, p) => {
+  const E = req.E, a = E.agendamentos.find(a => a.id === p.id && a.clienteId === req.user.id);
   if (!a || a.status !== 'agendado') fail(404, 'Agendamento não encontrado.');
   a.status = 'cancelado'; a.canceladoPor = 'cliente';
-  changed();
-  pushAdmins('❌ Agendamento cancelado', `${a.clienteNome} cancelou ${a.servicoNome}\n${fmtData(a.data)} às ${a.hora}`);
+  changed(E);
+  pushAdmins(E, '❌ Agendamento cancelado', `${a.clienteNome} cancelou ${a.servicoNome}\n${fmtData(a.data)} às ${a.hora}`);
   return { ok: true };
 });
 
-/* ----- administrador ----- */
-function snapshot() {
-  const d = { config: DB.config };
-  for (const c of COLS) d[c] = c === 'users' ? DB.users.map(pubUser) : DB[c];
+/* ----- empresa: dono ----- */
+function snapshot(E) {
+  const d = { config: E.config };
+  for (const c of COLS) d[c] = c === 'users' ? E.users.map(pubUser) : E[c];
   return d;
 }
-route('GET', '/api/db', 'admin', req => {
+route('GET', T + '/db', 'admin', req => {
   const v = +req.query.get('v');
-  return v === DB.version ? { v, same: true } : { v: DB.version, data: snapshot() };
+  return v === req.E.version ? { v, same: true } : { v: req.E.version, data: snapshot(req.E) };
 });
-route('POST', '/api/sync', 'admin', (req, b) => {
-  const changes = Array.isArray(b.changes) ? b.changes : [];
-  for (const ch of changes) {
-    if (ch.col === 'config') { if (ch.doc && typeof ch.doc === 'object') DB.config = { ...DB.config, ...ch.doc }; continue; }
+route('POST', T + '/sync', 'admin', (req, b) => {
+  const E = req.E;
+  for (const ch of Array.isArray(b.changes) ? b.changes : []) {
+    if (ch.col === 'config') {
+      if (ch.doc && typeof ch.doc === 'object') { const { nicho, ...resto } = ch.doc; E.config = { ...E.config, ...resto }; } // nicho só pela Central
+      continue;
+    }
     if (!COLS.includes(ch.col)) continue;
-    const arr = DB[ch.col];
+    const arr = E[ch.col];
     if (ch.op === 'del') {
       if (ch.col === 'users' && arr.find(u => u.id === ch.id)?.role === 'admin') continue;
-      DB[ch.col] = arr.filter(x => x.id !== ch.id);
+      E[ch.col] = arr.filter(x => x.id !== ch.id);
       continue;
     }
     const doc = ch.doc;
@@ -233,7 +313,7 @@ route('POST', '/api/sync', 'admin', (req, b) => {
       const { novaSenha, hasSenha, senha, ...clean } = doc;
       const ex = arr.find(u => u.id === doc.id);
       if (ex) {
-        const keep = { senha: ex.senha, role: ex.role, ...(ex.role === 'admin' ? { login: ex.login } : {}) };
+        const keep = { senha: ex.senha, role: ex.role, ...(ex.role === 'admin' ? { login: ex.login, bloqueado: false } : {}) };
         Object.assign(ex, clean, keep);
         if (novaSenha && ex.role === 'cliente') ex.senha = hashPw(novaSenha);
       } else arr.push({ ...clean, role: 'cliente', senha: novaSenha ? hashPw(novaSenha) : '' });
@@ -242,52 +322,146 @@ route('POST', '/api/sync', 'admin', (req, b) => {
     const i = arr.findIndex(x => x.id === doc.id);
     if (i >= 0) arr[i] = doc; else arr.push(doc);
   }
-  changed();
-  return { v: DB.version };
+  changed(E);
+  return { v: E.version };
 });
-route('POST', '/api/senha', 'admin', (req, b) => {
+route('POST', T + '/senha', 'admin', (req, b) => {
   if (!checkPw(b.atual, req.user.senha)) fail(400, 'Senha atual incorreta.');
   if (String(b.nova || '').length < 4) fail(400, 'Nova senha muito curta.');
   const login = str(b.login, 60).toLowerCase();
-  if (login && DB.users.some(u => u.login === login && u.id !== req.user.id)) fail(409, 'Esse usuário já existe.');
+  if (login && loginEmUso(login, req.E.meta.slug, req.user.id)) fail(409, 'Esse usuário já está em uso. Escolha outro.');
   if (login) req.user.login = login;
   req.user.senha = hashPw(b.nova);
-  changed(); return { ok: true };
+  changed(req.E); return { ok: true };
 });
-route('POST', '/api/push/subscribe', 'admin', (req, b) => {
+route('POST', T + '/push/subscribe', 'admin', (req, b) => {
+  const E = req.E;
   if (!b.sub?.endpoint || !b.sub?.keys?.p256dh) fail(400, 'Inscrição inválida.');
-  DB.pushSubs = DB.pushSubs.filter(s => s.sub.endpoint !== b.sub.endpoint);
-  DB.pushSubs.push({ uid: req.user.id, sub: b.sub, em: new Date().toISOString() });
-  flush(); return { ok: true };
+  E.pushSubs = E.pushSubs.filter(s => s.sub.endpoint !== b.sub.endpoint);
+  E.pushSubs.push({ uid: req.user.id, sub: b.sub, em: new Date().toISOString() });
+  salvar(E); return { ok: true };
 });
-route('POST', '/api/push/teste', 'admin', () => { pushAdmins('🔔 Teste', 'As notificações estão funcionando!'); return { ok: true, aparelhos: DB.pushSubs.length }; });
-route('GET', '/api/backup', 'admin', () => {
-  const d = { config: DB.config, backupEm: new Date().toISOString() };
-  for (const c of COLS) d[c] = DB[c];
+route('POST', T + '/push/teste', 'admin', req => { pushAdmins(req.E, '🔔 Teste', 'As notificações estão funcionando!'); return { ok: true, aparelhos: req.E.pushSubs.length }; });
+route('GET', T + '/backup', 'admin', req => {
+  const d = { config: req.E.config, backupEm: new Date().toISOString() };
+  for (const c of COLS) d[c] = req.E[c];
   return d;
 });
-route('POST', '/api/restore', 'admin', (req, b) => {
+route('POST', T + '/restore', 'admin', (req, b) => {
+  const E = req.E;
   if (!b.config || !Array.isArray(b.users)) fail(400, 'Arquivo de backup inválido.');
-  DB.config = b.config;
-  for (const c of COLS) if (Array.isArray(b[c])) DB[c] = b[c];
-  if (!DB.users.some(u => u.id === req.user.id)) DB.users.push(req.user); // não se trancar para fora
-  DB.users.forEach(u => { if (u.senha && !u.senha.includes(':')) u.senha = ''; }); // senhas de backups antigos
-  changed(); return { ok: true };
-});
-route('POST', '/api/reset', 'admin', (req, b) => {
-  if (b.confirm !== 'APAGAR') fail(400, 'Confirmação inválida.');
-  DB = Object.assign(blank(), { vapid: DB.vapid });
-  changed(); return { ok: true };
+  const nicho = E.config.nicho;
+  E.config = { ...b.config, nicho };
+  for (const c of COLS) if (c !== 'users' && Array.isArray(b[c])) E[c] = b[c];
+  // usuários: mantém o dono atual e restaura só os clientes
+  E.users = E.users.filter(u => u.role === 'admin').concat(b.users.filter(u => u.role === 'cliente').map(u => ({ ...u, senha: u.senha && u.senha.includes(':') ? u.senha : '' })));
+  changed(E); return { ok: true };
 });
 
-/* ---------------- http ---------------- */
+/* ================= Central ================= */
+route('POST', '/api/central/login', null, (req, b) => {
+  if (!CENTRAL_SENHA) fail(503, 'Central desativada: configure CENTRAL_SENHA no servidor.');
+  if (bloqueado(req.ip)) fail(429, 'Muitas tentativas. Aguarde 15 minutos.');
+  if (!igual(str(b.login).toLowerCase(), CENTRAL_USUARIO) || !igual(String(b.senha || ''), CENTRAL_SENHA)) { falhou(req.ip); fail(401, 'Usuário ou senha incorretos.'); }
+  const token = novaSessao(META.sessions, 'central'); marcar('meta'); flush();
+  return { token };
+});
+route('POST', '/api/central/logout', 'central', req => { delete META.sessions[req.token]; marcar('meta'); flush(); return { ok: true }; });
+
+function resumo(E) {
+  const mes = hojeSP().slice(0, 7);
+  const dono = E.users.find(u => u.role === 'admin');
+  return {
+    slug: E.meta.slug, negocio: E.config.negocio, nicho: E.config.nicho,
+    dono: dono?.nome || '', login: dono?.login || '', donoTel: E.meta.donoTel || '',
+    criado: E.meta.criado, vence: E.meta.vence || '', valor: E.meta.valor || 0, obs: E.meta.obs || '',
+    bloqueado: !!E.meta.bloqueado, situacao: situacao(E),
+    clientes: E.users.filter(u => u.role === 'cliente').length,
+    agMes: E.agendamentos.filter(a => (a.data || '').startsWith(mes) && a.status !== 'cancelado').length,
+    agApp: E.agendamentos.filter(a => (a.data || '').startsWith(mes) && a.criadoPor === 'cliente').length,
+    ultimoUso: E.agendamentos.map(a => a.criadoEm || '').sort().pop()?.slice(0, 10) || ''
+  };
+}
+route('GET', '/api/central/empresas', 'central', () => ({ hoje: hojeSP(), suporte: SUPORTE, empresas: Object.values(EMP).map(resumo).sort((a, b) => a.negocio.localeCompare(b.negocio)) }));
+
+route('POST', '/api/central/empresas', 'central', (req, b) => {
+  const negocio = str(b.negocio, 80), nicho = str(b.nicho, 30), login = str(b.login, 60).toLowerCase();
+  if (!negocio) fail(400, 'Informe o nome do negócio.');
+  if (!NICHOS[nicho]) fail(400, 'Escolha o nicho.');
+  if (!/^[a-z0-9._@-]{3,60}$/.test(login)) fail(400, 'Usuário: mínimo 3 caracteres, sem espaços nem acentos.');
+  if (String(b.senha || '').length < 4) fail(400, 'Senha: mínimo 4 caracteres.');
+  if (loginEmUso(login)) fail(409, 'Esse usuário já está em uso por outro assinante.');
+  let slug = slugify(b.slug || negocio);
+  if (b.slug) { if (EMP[slug] || RESERVADOS.has(slug)) fail(409, `O link /${slug} já está em uso.`); }
+  else slug = slugLivre(negocio);
+  const E = blankEmp(), hoje = hojeSP(), N = NICHOS[nicho];
+  E.meta = { slug, criado: hoje, vence: isoData(b.vence) ? b.vence : '', bloqueado: false, valor: n(b.valor), donoTel: str(b.donoTel, 30), obs: str(b.obs, 300) };
+  E.config = { negocio, nicho, abre: '09:00', fecha: '19:00', intervalo: 30, dias: [1, 2, 3, 4, 5, 6], tz: TZ_PADRAO };
+  const dono = { id: uid(), nome: str(b.dono, 80) || negocio, login, senha: hashPw(b.senha), role: 'admin', tel: str(b.donoTel, 30), criado: hoje };
+  E.users.push(dono);
+  E.profissionais.push({ id: uid(), nome: dono.nome, ativo: true });
+  E.servicos = N.servicos.map(([nome, preco, duracao]) => ({ id: uid(), nome, preco, duracao, ativo: true }));
+  E.produtos = N.produtos.map(([nome, custo, preco, qtd]) => ({ id: uid(), nome, custo, preco, qtd, min: Math.max(2, Math.round(qtd / 3)) }));
+  EMP[slug] = E; changed(E);
+  return { empresa: resumo(E) };
+});
+
+const empCentral = slug => EMP[slug] || fail(404, 'Empresa não encontrada.');
+route('PUT', '/api/central/empresas/:slug', 'central', (req, b, p) => {
+  const E = empCentral(p.slug);
+  if (b.negocio !== undefined && str(b.negocio)) E.config.negocio = str(b.negocio, 80);
+  if (b.nicho !== undefined) {
+    if (!NICHOS[b.nicho]) fail(400, 'Nicho inválido.');
+    if (b.nicho !== E.config.nicho && b.recarregarServicos) E.servicos = NICHOS[b.nicho].servicos.map(([nome, preco, duracao]) => ({ id: uid(), nome, preco, duracao, ativo: true }));
+    E.config.nicho = b.nicho;
+  }
+  if (b.vence !== undefined) E.meta.vence = isoData(b.vence) ? b.vence : '';
+  if (b.valor !== undefined) E.meta.valor = n(b.valor);
+  if (b.donoTel !== undefined) E.meta.donoTel = str(b.donoTel, 30);
+  if (b.obs !== undefined) E.meta.obs = str(b.obs, 300);
+  if (b.bloqueado !== undefined) E.meta.bloqueado = !!b.bloqueado;
+  const dono = E.users.find(u => u.role === 'admin');
+  if (b.dono !== undefined && str(b.dono) && dono) dono.nome = str(b.dono, 80);
+  if (b.login !== undefined && dono) {
+    const login = str(b.login, 60).toLowerCase();
+    if (!/^[a-z0-9._@-]{3,60}$/.test(login)) fail(400, 'Usuário inválido.');
+    if (loginEmUso(login, E.meta.slug, dono.id)) fail(409, 'Esse usuário já está em uso por outro assinante.');
+    dono.login = login;
+  }
+  changed(E); return { empresa: resumo(E) };
+});
+route('POST', '/api/central/empresas/:slug/renovar', 'central', (req, b, p) => {
+  const E = empCentral(p.slug), dias = Math.min(Math.max(parseInt(b.dias) || 30, 1), 3660);
+  const base = E.meta.vence && E.meta.vence > hojeSP() ? E.meta.vence : hojeSP();
+  E.meta.vence = somaDias(base, dias); E.meta.bloqueado = false;
+  changed(E); return { empresa: resumo(E) };
+});
+route('POST', '/api/central/empresas/:slug/senha', 'central', (req, b, p) => {
+  const E = empCentral(p.slug), dono = E.users.find(u => u.role === 'admin');
+  if (String(b.senha || '').length < 4) fail(400, 'Senha: mínimo 4 caracteres.');
+  dono.senha = hashPw(b.senha);
+  for (const [k, s] of Object.entries(E.sessions)) if (s.uid === dono.id) delete E.sessions[k];
+  changed(E); return { ok: true };
+});
+route('DELETE', '/api/central/empresas/:slug', 'central', (req, b, p) => {
+  const E = empCentral(p.slug);
+  if (b.confirm !== E.meta.slug) fail(400, 'Digite o link da empresa para confirmar.');
+  delete EMP[p.slug]; marcar('t:' + p.slug); flush();
+  return { ok: true };
+});
+route('GET', '/api/central/empresas/:slug/backup', 'central', (req, b, p) => {
+  const E = empCentral(p.slug), d = { config: E.config, meta: E.meta, backupEm: new Date().toISOString() };
+  for (const c of COLS) d[c] = E[c];
+  return d;
+});
+
+/* ================= http ================= */
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json' };
 
 function send(res, status, obj) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
   res.end(JSON.stringify(obj));
 }
-
 function readBody(req, limit = 15e6) {
   return new Promise((ok, ko) => {
     let size = 0; const chunks = [];
@@ -296,15 +470,47 @@ function readBody(req, limit = 15e6) {
     req.on('error', ko);
   });
 }
-
+const escHtml = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+let INDEX_HTML = null;
+function paginaEmpresa(res, slug) {
+  INDEX_HTML = INDEX_HTML || fs.readFileSync(path.join(PUBLIC, 'index.html'), 'utf8');
+  const E = slug && EMP[slug];
+  let html = INDEX_HTML;
+  if (E) html = html.replace('<title>AgendaPro Beleza</title>', `<title>${escHtml(E.config.negocio)} · Agendamento</title>`)
+    .replace('href="/manifest.json"', `href="/m/${slug}.webmanifest"`);
+  res.writeHead(200, { 'Content-Type': MIME['.html'], 'Cache-Control': 'no-cache' });
+  res.end(html);
+}
+function manifestEmpresa(res, slug) {
+  const E = EMP[slug];
+  if (!E) { res.writeHead(404); return res.end(); }
+  const cor = NICHOS[E.config.nicho]?.cor || '#14121a';
+  res.writeHead(200, { 'Content-Type': MIME['.webmanifest'], 'Cache-Control': 'no-cache' });
+  res.end(JSON.stringify({
+    name: E.config.negocio, short_name: E.config.negocio.slice(0, 12), description: 'Agende seu horário online',
+    id: '/' + slug, start_url: '/' + slug, scope: '/', display: 'standalone', orientation: 'portrait',
+    background_color: '#14121a', theme_color: cor, lang: 'pt-BR',
+    icons: [{ src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' }, { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' }]
+  }));
+}
 function serveStatic(req, res, pathname) {
-  let file = path.normalize(path.join(PUBLIC, decodeURIComponent(pathname)));
-  if (!file.startsWith(PUBLIC)) { res.writeHead(403); return res.end(); }
-  if (pathname === '/' || !fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(PUBLIC, 'index.html');
+  const seg = decodeURIComponent(pathname).split('/').filter(Boolean);
+  if (seg[0] === 'central' && seg.length === 1) pathname = '/central.html';
+  else if (seg[0] === 'm' && seg.length === 2 && seg[1].endsWith('.webmanifest')) return manifestEmpresa(res, seg[1].replace('.webmanifest', ''));
+  else if (seg.length === 0 || (seg.length === 1 && !seg[0].includes('.'))) return paginaEmpresa(res, seg[0]);
+  const file = path.normalize(path.join(PUBLIC, decodeURIComponent(pathname)));
+  if (!file.startsWith(PUBLIC + path.sep) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) { res.writeHead(404, { 'Content-Type': 'text/plain' }); return res.end('Não encontrado'); }
   const ext = path.extname(file);
-  const noCache = ['.html', '.js', '.css', '.json'].includes(ext);
-  res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': noCache ? 'no-cache' : 'public, max-age=604800' });
+  res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': ['.html', '.js', '.css', '.json'].includes(ext) ? 'no-cache' : 'public, max-age=604800' });
   fs.createReadStream(file).pipe(res);
+}
+
+function autenticar(store, req) {
+  const token = String(req.headers.authorization || '').replace(/^Bearer /, '');
+  const s = token && store[token];
+  if (!s || s.exp < Date.now()) fail(401, 'Faça login novamente.');
+  req.token = token;
+  return s;
 }
 
 const server = http.createServer(async (req, res) => {
@@ -315,23 +521,28 @@ const server = http.createServer(async (req, res) => {
   try {
     const r = routes.find(r => r.method === req.method && r.re.test(url.pathname));
     if (!r) fail(404, 'Rota não encontrada.');
-    if (r.auth) {
-      const token = String(req.headers.authorization || '').replace(/^Bearer /, '');
-      const s = token && DB.sessions[token];
-      if (!s || s.exp < Date.now()) fail(401, 'Faça login novamente.');
-      const u = DB.users.find(u => u.id === s.uid);
-      if (!u || u.bloqueado) fail(401, 'Faça login novamente.');
-      if (r.auth === 'admin' && u.role !== 'admin') fail(403, 'Acesso restrito ao administrador.');
-      req.user = u; req.token = token;
+    const params = url.pathname.match(r.re).groups || {};
+    if (r.auth === 'central') autenticar(META.sessions, req);
+    else if (r.auth) {
+      const E = EMP[params.slug];
+      if (!E) fail(404, 'Empresa não encontrada. Confira o link.');
+      req.E = E;
+      if (r.auth !== 'empresa') {
+        const s = autenticar(E.sessions, req);
+        const u = E.users.find(u => u.id === s.uid);
+        if (!u || u.bloqueado) fail(401, 'Faça login novamente.');
+        if (r.auth === 'admin' && u.role !== 'admin') fail(403, 'Acesso restrito ao administrador.');
+        req.user = u;
+      }
+      if (situacao(E) !== 'ativa' && !url.pathname.endsWith('/public')) fail(423, situacao(E) === 'vencida' ? 'Assinatura vencida. Fale com o suporte para renovar.' : 'Acesso suspenso. Fale com o suporte.');
     }
-    const body = ['POST', 'PUT'].includes(req.method) ? await readBody(req) : {};
-    const out = await r.fn(req, body, url.pathname.match(r.re).groups || {});
-    send(res, 200, out);
+    const body = ['POST', 'PUT', 'DELETE'].includes(req.method) ? await readBody(req) : {};
+    send(res, 200, await r.fn(req, body, params));
   } catch (e) {
     if (!(e instanceof HttpErr)) console.error(e);
     send(res, e.status || 500, { erro: e instanceof HttpErr ? e.message : 'Erro interno no servidor.' });
   }
 });
 
-loadDB().then(() => server.listen(PORT, () => console.log(`AgendaPro rodando em http://localhost:${PORT}`)))
+loadDB().then(() => server.listen(PORT, () => console.log(`AgendaPro rodando em http://localhost:${PORT}  ·  Central: /central`)))
   .catch(e => { console.error('Não foi possível iniciar:', e); process.exit(1); });

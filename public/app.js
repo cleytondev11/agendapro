@@ -1,31 +1,11 @@
 /* AgendaPro Beleza — app (PWA) conectado ao servidor.
    Clientes agendam do próprio celular; o painel do dono recebe na hora. */
 
-const TOK_KEY = 'agendapro_token';
+// Link da empresa: agendapro.com/nome-do-negocio  →  SLUG = 'nome-do-negocio'
+const SLUG = decodeURIComponent(location.pathname.split('/')[1] || '').toLowerCase();
+const TOK_KEY = 'agendapro_token_' + SLUG;
 const POLL_MS = 15000;
 
-const NICHOS = {
-  barbearia: {
-    label: 'Barbearia', icon: '💈', cor: '#c8a24a',
-    servicos: [['Corte masculino', 40, 30], ['Barba', 30, 20], ['Corte + barba', 60, 50], ['Pezinho', 15, 10], ['Sobrancelha', 15, 10], ['Pigmentação', 35, 30]],
-    produtos: [['Pomada modeladora', 18, 45, 10], ['Óleo para barba', 15, 40, 8], ['Shampoo anticaspa', 12, 35, 6], ['Lâmina descartável (cx)', 25, 0, 5]]
-  },
-  lash: {
-    label: 'Lash / Cílios', icon: '👁️', cor: '#d9668f',
-    servicos: [['Fio a fio', 130, 120], ['Volume brasileiro', 150, 120], ['Volume russo', 180, 150], ['Manutenção', 80, 60], ['Remoção', 40, 30], ['Lash lifting', 100, 60]],
-    produtos: [['Cola para extensão', 60, 0, 3], ['Fios 0.07 (caixa)', 35, 0, 5], ['Removedor em gel', 25, 0, 2], ['Escovinhas (pct)', 8, 15, 10]]
-  },
-  manicure: {
-    label: 'Manicure & Pedicure', icon: '💅', cor: '#e0607e',
-    servicos: [['Manicure', 30, 40], ['Pedicure', 35, 45], ['Pé e mão', 60, 80], ['Esmaltação em gel', 70, 60], ['Alongamento em gel', 150, 120], ['Spa dos pés', 50, 40]],
-    produtos: [['Esmalte (un)', 6, 15, 20], ['Acetona 500ml', 9, 0, 4], ['Lixa (pct)', 10, 0, 5], ['Gel construtor', 45, 0, 2]]
-  },
-  cabeleireira: {
-    label: 'Salão / Cabeleireira', icon: '💇‍♀️', cor: '#9a72e0',
-    servicos: [['Corte feminino', 70, 60], ['Escova', 50, 45], ['Hidratação', 80, 60], ['Coloração', 150, 120], ['Luzes / Mechas', 300, 240], ['Progressiva', 250, 180]],
-    produtos: [['Shampoo profissional', 40, 75, 4], ['Máscara de hidratação', 55, 95, 4], ['Tinta (tubo)', 18, 0, 10], ['Água oxigenada', 14, 0, 4]]
-  }
-};
 const DIAS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 const PAGTOS = ['Pix', 'Dinheiro', 'Cartão de débito', 'Cartão de crédito'];
 const CAT_SAIDA = ['Aluguel', 'Energia/Água', 'Internet', 'Salários/Comissões', 'Compra de produtos', 'Manutenção', 'Marketing', 'Impostos', 'Outros'];
@@ -59,11 +39,12 @@ let TOKEN = localStorage.getItem(TOK_KEY) || '';
 async function api(method, url, body) {
   let r;
   try {
-    r = await fetch(url, { method, headers: { 'Content-Type': 'application/json', ...(TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {}) }, body: body ? JSON.stringify(body) : undefined });
+    r = await fetch(url.startsWith('/api/login-dono') ? url : url.replace(/^\/api\//, `/api/t/${encodeURIComponent(SLUG)}/`), { method, headers: { 'Content-Type': 'application/json', ...(TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {}) }, body: body ? JSON.stringify(body) : undefined });
   } catch { setOffline(true); throw new Error('Sem conexão com o servidor.'); }
   setOffline(false);
   let j = null; try { j = await r.json(); } catch { }
   if (r.status === 401 && TOKEN && !url.startsWith('/api/login')) { setToken(''); me = null; boot(); throw new Error(j?.erro || 'Sessão expirada.'); }
+  if (r.status === 423) { clearInterval(pollT); renderSuspenso(j?.erro); throw new Error(j?.erro || 'Acesso suspenso.'); }
   if (!r.ok) throw new Error(j?.erro || 'Erro no servidor.');
   return j;
 }
@@ -77,7 +58,7 @@ function setOffline(on) {
 /* ---------------- estado ---------------- */
 const blank = () => ({ config: null, users: [], profissionais: [], servicos: [], produtos: [], agendamentos: [], compras: [], vendas: [], lancamentos: [] });
 let S = blank(), snap = blank(), VER = -1, PUB = null;
-let me = null, view = '';
+let me = null, view = '', ASSIN = null;
 const ui = { agendaData: today(), agendaProf: '', finMes: mesAtual(), busca: '', book: {}, slots: {}, novos: new Set() };
 const byId = (col, id) => S[col].find(x => x.id === id);
 
@@ -152,22 +133,19 @@ function applyTheme() {
   const cor = S.config ? (NICHOS[S.config.nicho]?.cor || '#d9668f') : '#d9668f';
   document.documentElement.style.setProperty('--ac', cor);
 }
-function seedNicho(nicho) {
-  const n = NICHOS[nicho];
-  S.servicos = n.servicos.map(([nome, preco, duracao]) => ({ id: uid(), nome, preco, duracao, ativo: true }));
-}
 function lancar(tipo, descricao, valor, categoria, data = today(), ref = '', pagamento = '') {
   S.lancamentos.push({ id: uid(), tipo, descricao, valor: num(valor), categoria, data, ref, pagamento });
 }
 
 /* ---------------- sessão ---------------- */
 async function boot() {
+  if (!SLUG) return renderPortal();
   try { PUB = await api('GET', '/api/public'); }
-  catch (e) { return renderErro(e.message); }
+  catch (e) { return /não encontrada/i.test(e.message) ? renderNaoEncontrada() : renderErro(e.message); }
   S.config = PUB.config; applyTheme();
-  if (!PUB.configured) return renderSetup();
+  if (PUB.situacao !== 'ativa') return renderSuspenso();
   me = null;
-  if (TOKEN) { try { me = (await api('GET', '/api/me')).user; } catch { } }
+  if (TOKEN) { try { const r = await api('GET', '/api/me'); me = r.user; ASSIN = r.assinatura || null; } catch { } }
   if (!me) return renderLogin();
   if (me.role === 'admin') {
     VER = -1; await pull(true); applyTheme(); startPolling();
@@ -182,50 +160,45 @@ async function logout() {
   try { await api('POST', '/api/logout'); } catch { }
   setToken(''); me = null; view = ''; clearInterval(pollT); S = blank(); boot();
 }
+const telaSimples = (icon, titulo, html) => `<div class="auth"><div class="auth-card"><div class="brand"><div class="logo">${icon}</div><h1>${titulo}</h1></div>${html}</div></div>`;
 function renderErro(msg) {
-  $('#app').innerHTML = `<div class="auth"><div class="auth-card"><div class="brand"><div class="logo">⚠️</div><h1>Sem conexão</h1></div>
-    <p class="mut" style="margin-top:10px">${esc(msg)} Verifique sua internet.</p><button class="btn block" onclick="boot()">Tentar de novo</button></div></div>`;
+  $('#app').innerHTML = telaSimples('⚠️', 'Sem conexão', `<p class="mut" style="margin-top:10px">${esc(msg)} Verifique sua internet.</p><button class="btn block" onclick="boot()">Tentar de novo</button>`);
+}
+function renderNaoEncontrada() {
+  $('#app').innerHTML = telaSimples('🔎', 'Link não encontrado', `<p class="mut" style="margin-top:10px">Confira se o endereço está certo. Se você é assinante, entre pela página inicial.</p><a class="btn block" href="/">Ir para o login do assinante</a>`);
+}
+function renderSuspenso(msg) {
+  const sup = PUB?.suporte;
+  const dono = me?.role === 'admin';
+  $('#app').innerHTML = telaSimples('⏸️', esc(PUB?.config?.negocio || 'Agenda'), `
+    <p style="margin-top:14px;font-weight:700">${dono ? esc(msg || 'Sua assinatura está suspensa ou vencida.') : 'A agenda online está temporariamente indisponível.'}</p>
+    <p class="mut small" style="margin-top:6px">${dono ? 'Renove para voltar a usar o sistema. Seus dados estão guardados.' : 'Entre em contato direto com o estabelecimento para marcar seu horário.'}</p>
+    ${dono && sup ? `<a class="btn block" target="_blank" rel="noopener" href="https://wa.me/${sup}?text=${encodeURIComponent('Olá! Quero renovar o acesso do ' + (PUB?.config?.negocio || 'meu negócio') + ' (link /' + SLUG + ').')}">💬 Falar com o suporte</a>` : ''}
+    ${dono ? '<button class="btn ghost block" onclick="setToken(\'\');location.reload()">Sair</button>' : '<p class="small" style="margin-top:18px"><a href="/" style="color:var(--mut)">É o dono? Entrar no painel</a></p>'}`);
 }
 
-/* ---------------- primeira configuração ---------------- */
-function renderSetup() {
-  let nicho = 'barbearia';
+/* ---------------- portal do assinante (página inicial) ---------------- */
+function renderPortal() {
+  document.title = 'AgendaPro · Área do assinante';
   $('#app').innerHTML = `
-  <div class="auth"><div class="auth-card" style="max-width:460px">
-    <div class="brand"><div class="logo">✨</div><h1>AgendaPro</h1></div>
-    <p class="mut small">Primeiro acesso: configure seu negócio e crie o login do administrador.</p>
-    <label>Qual é o seu nicho?</label>
-    <div class="nichos" id="nichos">${Object.entries(NICHOS).map(([k, n]) => `
-      <button type="button" class="nicho ${k === nicho ? 'on' : ''}" data-k="${k}"><span>${n.icon}</span><b>${n.label}</b></button>`).join('')}</div>
-    <form id="f">
-      <label>Nome do estabelecimento</label><input name="negocio" required placeholder="Ex.: Studio Bella">
-      <label>Seu nome</label><input name="nome" required>
-      <div class="row">
-        <div><label>Usuário (login)</label><input name="login" required autocomplete="username" autocapitalize="none"></div>
-        <div><label>Senha</label><input name="senha" type="password" required minlength="4" autocomplete="new-password"></div>
-      </div>
+  <div class="auth"><div class="auth-card">
+    <div class="brand"><div class="logo">✨</div><div><h1>AgendaPro</h1><div class="mut small">Área do assinante</div></div></div>
+    <form id="f" style="margin-top:18px">
+      <label>Usuário</label><input name="login" required autocomplete="username" autocapitalize="none">
+      <label>Senha</label><input name="senha" type="password" required autocomplete="current-password">
       <div class="err" id="err"></div>
-      <button class="btn block">Criar e entrar</button>
+      <button class="btn block">Entrar no meu painel</button>
+      <p class="mut small" style="margin-top:12px">É cliente e quer agendar? Use o link que o estabelecimento enviou para você.</p>
     </form>
   </div></div>`;
-  $('#nichos').onclick = e => {
-    const b = e.target.closest('.nicho'); if (!b) return;
-    nicho = b.dataset.k;
-    document.querySelectorAll('.nicho').forEach(x => x.classList.toggle('on', x === b));
-    document.documentElement.style.setProperty('--ac', NICHOS[nicho].cor);
-  };
-  document.documentElement.style.setProperty('--ac', NICHOS[nicho].cor);
   $('#f').onsubmit = async e => {
     e.preventDefault();
-    const f = Object.fromEntries(new FormData(e.target)), n = NICHOS[nicho];
+    const f = Object.fromEntries(new FormData(e.target)), btn = e.target.querySelector('.btn'); btn.disabled = true;
     try {
-      const r = await api('POST', '/api/setup', {
-        ...f, nicho, tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        servicos: n.servicos.map(([nome, preco, duracao]) => ({ nome, preco, duracao })),
-        produtos: n.produtos.map(([nome, custo, preco, qtd]) => ({ nome, custo, preco, qtd, min: Math.max(2, Math.round(qtd / 3)) }))
-      });
-      setToken(r.token); boot();
-    } catch (err) { $('#err').textContent = err.message; }
+      const r = await api('POST', '/api/login-dono', f);
+      localStorage.setItem('agendapro_token_' + r.slug, r.token);
+      location.href = '/' + r.slug;
+    } catch (err) { $('#err').textContent = err.message; btn.disabled = false; }
   };
 }
 
@@ -284,6 +257,7 @@ function shell(title, actions, body) {
       <div class="me"><b>${esc(me.nome)}</b><div class="mut">${me.role === 'admin' ? 'Administrador' : 'Cliente'}</div><button class="btn ghost sm" style="margin-top:8px" onclick="logout()">Sair</button></div>
     </aside>
     <main class="main">
+      ${avisoVencimento()}
       <div class="top"><h2>${title}</h2><div class="acts">${actions || ''}</div></div>
       ${body}
     </main>
@@ -292,6 +266,14 @@ function shell(title, actions, body) {
     ${extra.length ? `<a class="${extra.some(x => x[0] === view) ? 'on' : ''}" onclick="$('#more').classList.toggle('open')"><span class="i">☰</span>Mais</a>` : ''}</nav>
   <div class="more-menu nav" id="more">${extra.map(([k, i, l]) => `<a class="${view === k ? 'on' : ''}" onclick="go('${k}')"><span class="i">${i}</span>${l}</a>`).join('')}
     <a onclick="logout()"><span class="i">🚪</span>Sair</a></div>`;
+}
+
+function avisoVencimento() {
+  if (me?.role !== 'admin' || !ASSIN?.vence) return '';
+  const dias = Math.round((new Date(ASSIN.vence + 'T12:00') - new Date(today() + 'T12:00')) / 864e5);
+  if (dias > 5) return '';
+  const sup = PUB.suporte ? ` <a style="color:#fff;text-decoration:underline" target="_blank" rel="noopener" href="https://wa.me/${PUB.suporte}?text=${encodeURIComponent('Olá! Quero renovar o acesso do ' + S.config.negocio + '.')}">Renovar agora</a>` : '';
+  return `<div class="card" style="background:var(--warn);color:#1a1300;border:0;margin-bottom:14px;font-weight:700">⏳ Sua assinatura ${dias <= 0 ? 'vence hoje' : `vence em ${dias} dia(s)`} (${fmtData(ASSIN.vence)}).${sup}</div>`;
 }
 
 function go(v, keepScroll) {
@@ -752,7 +734,7 @@ function formServico(id) {
 /* ----- ajustes ----- */
 function vConfig() {
   const c = S.config;
-  const link = location.origin + location.pathname.replace(/index\.html$/, '');
+  const link = location.origin + '/' + SLUG;
   const convite = `Agende seu horário em ${c.negocio} pelo celular: ${link}`;
   const pushOk = 'serviceWorker' in navigator && 'PushManager' in window;
   shell('Ajustes', '', `
@@ -770,7 +752,7 @@ function vConfig() {
       <div class="card" style="margin-top:12px"><h3>Estabelecimento</h3>
         <form id="fc">
           <label>Nome</label><input name="negocio" value="${esc(c.negocio)}" required>
-          <label>Nicho</label><select name="nicho">${Object.entries(NICHOS).map(([k, n]) => `<option value="${k}" ${k === c.nicho ? 'selected' : ''}>${n.icon} ${n.label}</option>`).join('')}</select>
+          <label>Nicho</label><input value="${esc((NICHOS[c.nicho] || {}).icon + ' ' + (NICHOS[c.nicho] || {}).label)}" disabled>
           <div class="row"><div><label>Abre às</label><input type="time" name="abre" value="${c.abre}"></div><div><label>Fecha às</label><input type="time" name="fecha" value="${c.fecha}"></div></div>
           <label>Intervalo entre horários (min)</label><select name="intervalo">${[10, 15, 20, 30, 45, 60].map(m => `<option ${m == c.intervalo ? 'selected' : ''}>${m}</option>`).join('')}</select>
           <label>Dias de atendimento</label>
@@ -786,6 +768,9 @@ function vConfig() {
           <button class="btn ghost sm" onclick="byId('profissionais','${p.id}').ativo=${p.ativo === false};save();vConfig()">${p.ativo === false ? 'Ativar' : 'Desativar'}</button></div>`).join('')}</div>
         <button class="btn ghost sm" style="margin-top:10px" onclick="formProf()">+ Profissional</button>
       </div>
+      <div class="card" style="margin-top:12px"><h3>Assinatura</h3>
+        <p class="small">${ASSIN?.vence ? `Válida até <b>${fmtData(ASSIN.vence)}</b>` : 'Ativa'}${PUB.suporte ? ` · <a style="color:var(--ac)" target="_blank" rel="noopener" href="https://wa.me/${PUB.suporte}">falar com o suporte</a>` : ''}</p>
+      </div>
       <div class="card" style="margin-top:12px"><h3>Acesso do administrador</h3>
         <button class="btn ghost sm" onclick="formSenhaAdmin()">Trocar usuário / senha</button>
       </div>
@@ -794,7 +779,6 @@ function vConfig() {
         <div class="acts" style="margin-top:10px">
           <button class="btn ghost sm" onclick="baixarBackup()">Baixar backup</button>
           <label class="btn ghost sm" style="margin:0;color:var(--tx)">Restaurar<input type="file" accept=".json" class="hidden" onchange="restaurar(this.files[0])"></label>
-          <button class="btn bad sm" onclick="zerar()">Zerar sistema</button>
         </div>
       </div>
     </div>
@@ -804,9 +788,7 @@ function vConfig() {
     const f = Object.fromEntries(new FormData(e.target));
     const dias = DIAS.map((_, i) => f['d' + i] ? i : -1).filter(i => i >= 0);
     if (!dias.length) return toast('Escolha ao menos um dia');
-    const trocou = f.nicho !== c.nicho;
-    Object.assign(c, { negocio: f.negocio.trim(), nicho: f.nicho, abre: f.abre, fecha: f.fecha, intervalo: Number(f.intervalo), dias });
-    if (trocou && confirm(`Carregar a lista padrão de serviços de ${NICHOS[f.nicho].label}? (os serviços atuais serão substituídos)`)) seedNicho(f.nicho);
+    Object.assign(c, { negocio: f.negocio.trim(), abre: f.abre, fecha: f.fecha, intervalo: Number(f.intervalo), dias });
     save(); applyTheme(); toast('Ajustes salvos'); vConfig();
   };
 }
@@ -841,10 +823,6 @@ function restaurar(file) {
     } catch (e) { alert(e.message || 'Arquivo de backup inválido.'); }
   };
   r.readAsText(file);
-}
-async function zerar() {
-  if (prompt('Isso apaga TODOS os dados do servidor. Digite APAGAR para confirmar') !== 'APAGAR') return;
-  try { await api('POST', '/api/reset', { confirm: 'APAGAR' }); setToken(''); view = ''; boot(); } catch (e) { toast(e.message); }
 }
 
 /* ----- notificações push ----- */

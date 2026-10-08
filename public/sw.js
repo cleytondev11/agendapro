@@ -1,5 +1,5 @@
-const CACHE = 'agendapro-v2';
-const ASSETS = ['./', './index.html', './app.js', './style.css', './manifest.json', './icons/icon-192.png', './icons/icon-512.png'];
+const CACHE = 'agendapro-v3';
+const ASSETS = ['/index.html', '/app.js', '/nichos.js', '/style.css', '/icons/icon-192.png', '/icons/icon-512.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));
@@ -18,7 +18,7 @@ self.addEventListener('fetch', e => {
     fetch(e.request).then(res => {
       if (res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(e.request, copy)); }
       return res;
-    }).catch(() => caches.match(e.request).then(hit => hit || caches.match('./index.html')))
+    }).catch(() => caches.match(e.request).then(hit => hit || caches.match('/index.html')))
   );
 });
 
@@ -27,7 +27,7 @@ self.addEventListener('push', e => {
   let d = {};
   try { d = e.data.json(); } catch { d = { title: 'AgendaPro', body: e.data ? e.data.text() : '' }; }
   e.waitUntil(self.registration.showNotification(d.title || 'AgendaPro', {
-    body: d.body || '', icon: 'icons/icon-192.png', badge: 'icons/icon-192.png',
+    body: d.body || '', icon: '/icons/icon-192.png', badge: '/icons/icon-192.png',
     tag: 'agendapro-' + Date.now(), vibrate: [200, 100, 200], data: { url: d.url || './' }
   }));
 });
