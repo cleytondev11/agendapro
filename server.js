@@ -501,6 +501,26 @@ route('POST', T + '/esqueci', 'empresa', (req, b) => {
   return { ok: true, encontrado: !!u, whats: whatsEmpresa(E) };
 });
 
+/* ----- avisos para o cliente (o estabelecimento cancelou, mudou o horário, confirmou o sinal…) ----- */
+function avisosCliente(E, antes, a) {
+  if (!a || !a.clienteId || !antes) return;
+  const quando = `${fmtData(a.data)} às ${a.hora}`, neg = E.config.negocio;
+  let t = '', m = '';
+  if (antes.status === 'agendado' && a.status === 'cancelado' && a.canceladoPor !== 'cliente') {
+    t = '❌ Seu horário foi cancelado';
+    m = `${neg} cancelou ${a.servicoNome} de ${quando}.`;
+    if (a.sinal && ['devolver', 'devolvido'].includes(a.sinal.status)) m += `\nSeu sinal de ${brl(a.sinal.valor)} será devolvido.`;
+    m += '\nToque para remarcar.';
+  } else if (antes.status === 'agendado' && a.status === 'agendado' && (antes.data !== a.data || antes.hora !== a.hora)) {
+    t = '🔁 Seu horário mudou';
+    m = `${a.servicoNome} em ${neg}: agora ${quando} (antes ${fmtData(antes.data)} às ${antes.hora}).`;
+  } else if (antes.sinal && a.sinal && antes.sinal.status !== a.sinal.status) {
+    if (a.sinal.status === 'pago') { t = '✅ Sinal confirmado'; m = `${neg} confirmou seu Pix de ${brl(a.sinal.valor)}. Seu horário de ${quando} está garantido.`; }
+    if (a.sinal.status === 'devolvido') { t = '↩️ Sinal devolvido'; m = `${neg} devolveu seu sinal de ${brl(a.sinal.valor)}.`; }
+  }
+  if (t) pushAdmins(E, t, m, null, a.clienteId).catch(() => { });
+}
+
 /* ----- empresa: dono ----- */
 function snapshot(E, user) {
   if (user && user.role === 'func') {
@@ -531,7 +551,9 @@ function syncFuncionario(E, user, changes) {
     if (ch.col === 'agendamentos') {
       const ex = E.agendamentos.find(a => a.id === doc.id);
       if (doc.profId !== user.profId || (ex && ex.profId !== user.profId)) continue;
+      const antes = ex ? JSON.parse(JSON.stringify(ex)) : null;
       if (ex) Object.assign(ex, doc); else E.agendamentos.push(doc);
+      avisosCliente(E, antes, ex);
     } else if (ch.col === 'lancamentos') {
       const ag = E.agendamentos.find(a => a.id === doc.ref);
       if (doc.tipo !== 'entrada' || !ag || ag.profId !== user.profId || E.lancamentos.some(l => l.id === doc.id)) continue;
@@ -573,7 +595,9 @@ route('POST', T + '/sync', 'staff', (req, b) => {
       continue;
     }
     const i = arr.findIndex(x => x.id === doc.id);
+    const antes = ch.col === 'agendamentos' && i >= 0 ? arr[i] : null;
     if (i >= 0) arr[i] = doc; else arr.push(doc);
+    if (antes) avisosCliente(E, antes, doc);
   }
   changed(E);
   return { v: E.version };
@@ -587,19 +611,25 @@ route('POST', T + '/senha', 'admin', (req, b) => {
   req.user.senha = hashPw(b.nova);
   changed(req.E); return { ok: true };
 });
-route('POST', T + '/push/subscribe', 'staff', (req, b) => {
+// Equipe e clientes inscrevem o aparelho. Clientes: até 3 aparelhos cada, sem empurrar os aparelhos da equipe para fora.
+route('POST', T + '/push/subscribe', 'any', (req, b) => {
   const E = req.E;
-  if (!b.sub?.endpoint || !b.sub?.keys?.p256dh) fail(400, 'Inscrição inválida.');
+  if (!b.sub?.endpoint || !b.sub?.keys?.p256dh || String(b.sub.endpoint).length > 1000) fail(400, 'Inscrição inválida.');
   E.pushSubs = E.pushSubs.filter(s => s.sub.endpoint !== b.sub.endpoint);
   E.pushSubs.push({ uid: req.user.id, sub: b.sub, em: new Date().toISOString(), aparelho: str(b.aparelho, 60) });
-  if (E.pushSubs.length > 20) E.pushSubs = E.pushSubs.slice(-20);
-  salvar(E); return { ok: true, aparelhos: E.pushSubs.length };
+  const papel = s => E.users.find(u => u.id === s.uid)?.role || '';
+  const minhas = E.pushSubs.filter(s => s.uid === req.user.id);
+  if (req.user.role === 'cliente' && minhas.length > 3) E.pushSubs = E.pushSubs.filter(s => s.uid !== req.user.id || minhas.slice(-3).includes(s));
+  const equipe = E.pushSubs.filter(s => papel(s) !== 'cliente'), clientes = E.pushSubs.filter(s => papel(s) === 'cliente');
+  E.pushSubs = [...equipe.slice(-20), ...clientes.slice(-500)];
+  salvar(E); return { ok: true, aparelhos: E.pushSubs.filter(s => s.uid === req.user.id).length };
 });
-route('POST', T + '/push/teste', 'staff', async req => {
-  const resultados = await pushAdmins(req.E, '🔔 Teste do AgendaPro', 'Notificações funcionando! Você será avisado a cada novo agendamento.', null, req.user.id);
+route('POST', T + '/push/teste', 'any', async req => {
+  const cli = req.user.role === 'cliente';
+  const resultados = await pushAdmins(req.E, '🔔 Avisos ativados', cli ? `Você será avisado aqui sobre seus horários em ${req.E.config.negocio}.` : 'Notificações funcionando! Você será avisado a cada novo agendamento.', null, req.user.id);
   return { resultados, aparelhos: resultados.length };
 });
-route('POST', T + '/push/remover', 'staff', (req, b) => {
+route('POST', T + '/push/remover', 'any', (req, b) => {
   req.E.pushSubs = req.E.pushSubs.filter(s => s.sub.endpoint !== b.endpoint); salvar(req.E); return { ok: true };
 });
 /* ----- equipe (funcionários com acesso ao app) ----- */

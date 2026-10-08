@@ -51,6 +51,11 @@ Na Central você:
 - Regra de cancelamento (mostrada ao cliente): cancelou **até o dia anterior** → o sinal é devolvido (você recebe o aviso "Devolver sinal" e marca **Já devolvi**, que lança a saída). Cancelou **no dia** → o sinal **não** é devolvido; para remarcar, ele faz um novo agendamento e paga o sinal de novo.
 - Você recebe notificação quando o cliente agenda, informa o Pix e cancela (dizendo se precisa devolver).
 
+## Avisos para o cliente
+- Em **Meus horários** o cliente toca em **Ativar avisos** e passa a receber notificação no celular quando você **cancela**, **muda o horário**, **confirma o sinal** ou **devolve o sinal**.
+- Quando você cancela, aparece também o botão **💬 Avisar no WhatsApp** com a mensagem pronta (e dizendo se o sinal será devolvido).
+- Ao abrir o app, o cliente vê o aviso "Horário cancelado" com o botão **Remarcar**, mesmo sem ter ativado as notificações.
+
 ## Cliente esqueceu a senha
 - Na tela de entrar, o cliente toca em **Esqueci minha senha** e informa o telefone.
 - Você recebe a notificação 🔑 e o pedido aparece no Dashboard e em Clientes. Toque em **Enviar nova**: o app cria uma senha nova e abre o WhatsApp do cliente com a mensagem pronta. A senha antiga deixa de valer.

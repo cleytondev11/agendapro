@@ -124,7 +124,7 @@ async function poll() {
   if (!staff() || syncing || document.hidden) return;
   try { if (await pull(false)) rerender(); } catch { }
 }
-document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden) return; if (me?.role === 'cliente' && $('#modal').classList.contains('hidden')) checarCancelamentos(); else poll(); });
 window.addEventListener('online', poll);
 let renderPendente = false;
 function rerender() {
@@ -162,6 +162,7 @@ async function boot() {
     clearInterval(pollT);
     S.servicos = PUB.servicos; S.profissionais = PUB.profissionais;
     go(CLI_VIEWS.includes(view) ? view : 'agendar');
+    garantirPush(); checarCancelamentos();
   }
 }
 async function logout() {
@@ -555,7 +556,7 @@ function vAgenda() {
   <div class="card">
     <div class="small mut" style="margin-bottom:6px">${DIAS[new Date(d + 'T12:00').getDay()]}, ${fmtData(d)} · ${lista.filter(a => a.status !== 'cancelado').length} agendamento(s) · previsto ${brl(prev)}</div>
     ${lista.length ? `<div class="list">${lista.map(a => {
-      const extra = [S.profissionais.length > 1 ? esc(byId('profissionais', a.profId)?.nome || '') : '', a.tel ? esc(a.tel) : '', a.pagamento || '', a.obs ? '“' + esc(a.obs) + '”' : '', a.canceladoPor === 'cliente' ? 'cancelado pelo cliente' : ''].filter(Boolean).join(' · ');
+      const extra = [S.profissionais.length > 1 ? esc(byId('profissionais', a.profId)?.nome || '') : '', a.tel ? esc(a.tel) : '', a.pagamento || '', a.obs ? '“' + esc(a.obs) + '”' : '', a.canceladoPor === 'cliente' ? 'cancelado pelo cliente' : a.status === 'cancelado' ? 'cancelado por você' : ''].filter(Boolean).join(' · ');
       const wa = a.tel ? `https://wa.me/55${a.tel.replace(/\D/g, '').replace(/^55(?=\d{10,11}$)/, '')}?text=${encodeURIComponent(`Olá ${a.clienteNome}! Confirmando seu horário em ${S.config.negocio}: ${fmtData(a.data)} às ${a.hora} (${a.servicoNome}).`)}` : '';
       return `<div class="ag ${ui.novos.has(a.id) ? 'novo' : ''} ${a.status}">
         <div class="ag-hora">${a.hora}<small>${a.duracao} min</small></div>
@@ -631,9 +632,16 @@ function cancelarAg(id) {
   const a = byId('agendamentos', id);
   const pago = a.sinal && ['pago', 'informado'].includes(a.sinal.status);
   if (!confirm(pago ? `Cancelar este agendamento?\n\nO cliente já pagou o sinal de ${brl(a.sinal.valor)}. Como foi você que cancelou, ele fica marcado para devolver.` : 'Cancelar este agendamento?')) return;
-  a.status = 'cancelado';
+  a.status = 'cancelado'; a.canceladoPor = 'estabelecimento';
   if (a.sinal) a.sinal.status = pago ? 'devolver' : a.sinal.status === 'pendente' ? 'nao-pago' : a.sinal.status;
   save(); go(view, true);
+  const tel = soDig(a.tel).replace(/^55(?=\d{10,11}$)/, '');
+  const msg = `Olá ${(a.clienteNome || '').split(' ')[0]}! Precisamos cancelar seu horário em ${S.config.negocio}: ${a.servicoNome}, ${fmtData(a.data)} às ${a.hora}.${pago ? ` Seu sinal de ${brl(a.sinal.valor)} será devolvido.` : ''} Desculpe o transtorno! Para remarcar: ${location.origin}/${SLUG}`;
+  openModal('Agendamento cancelado', `
+    <p>${a.clienteId ? '🔔 O cliente recebe a notificação no celular (se ativou os avisos) e vê o cancelamento em <b>Meus horários</b>.' : 'Cliente sem cadastro no app.'}</p>
+    ${pago ? `<p class="small" style="margin-top:8px">↩️ O sinal de ${brl(a.sinal.valor)} ficou marcado para devolver.</p>` : ''}
+    ${tel.length >= 10 ? `<p class="mut small" style="margin-top:8px">Para garantir, avise também pelo WhatsApp:</p><a class="btn block" target="_blank" rel="noopener" href="https://wa.me/55${tel}?text=${encodeURIComponent(msg)}" onclick="setTimeout(closeModal,300)">💬 Avisar no WhatsApp</a>` : ''}
+    <button type="button" class="btn ghost block" style="margin-top:8px" onclick="closeModal()">Fechar</button>`);
 }
 /* ----- sinal (Pix) dos agendamentos ----- */
 const SINAL_TXT = { pendente: '⏳ aguardando Pix', informado: '🧾 cliente informou o pagamento — confira', pago: '✅ sinal recebido', devolver: '↩️ DEVOLVER ao cliente', devolvido: '↩️ devolvido ao cliente', retido: '🔒 não devolvido (cancelou no dia)', 'nao-pago': 'não foi pago' };
@@ -1328,9 +1336,11 @@ async function vMeus() {
   ui.meus = Object.fromEntries(meus.map(a => [a.id, a]));
   const SIN_CLI = { pendente: '⏳ sinal aguardando pagamento', informado: '🧾 pagamento informado, aguardando confirmação', pago: '✅ sinal pago', devolver: '↩️ sinal será devolvido', devolvido: '↩️ sinal devolvido', retido: '🔒 sinal não devolvido (cancelado no dia)' };
   const linha = a => `<div class="item meu"><div class="hour">${a.hora}</div><div class="grow"><div class="t">${esc(a.servicoNome)}</div><div class="d">${DIAS[new Date(a.data + 'T12:00').getDay()]}, ${fmtData(a.data)} · ${brl(a.valor)}</div>
+    ${a.status === 'cancelado' && a.canceladoPor !== 'cliente' ? `<div class="d" style="color:var(--bad)">Cancelado por ${esc(PUB.config.negocio)}</div>` : ''}
     ${a.sinal && SIN_CLI[a.sinal.status] ? `<div class="d">💠 Sinal ${brl(a.sinal.valor)} · ${SIN_CLI[a.sinal.status]}</div>` : ''}</div><span class="pill ${a.status}">${a.status}</span>
     ${a.status === 'agendado' && a.data >= today() ? `<div class="acts" style="width:100%;justify-content:flex-end">${a.pix ? `<button class="btn sm" onclick="telaPix(ui.meus['${a.id}'])">💠 ${a.sinal.status === 'pendente' ? 'Pagar sinal' : 'Ver Pix'}</button>` : ''}<button class="btn ghost sm" onclick="cancelarCli('${a.id}')">Cancelar</button></div>` : ''}</div>`;
   shell('Meus horários', `<button class="btn" onclick="go('agendar')">+ Agendar</button>`, `
+  ${cardAvisosCliente()}
   <div class="card"><h3>Próximos</h3>${futuros.length ? `<div class="list">${futuros.map(linha).join('')}</div>` : '<div class="empty">Nenhum horário marcado.</div>'}</div>
   ${hist.length ? `<div class="card" style="margin-top:12px"><h3>Histórico</h3><div class="list">${hist.map(linha).join('')}</div></div>` : ''}`);
 }
@@ -1360,6 +1370,42 @@ function cancelarCli(id) {
     return false;
   });
 }
+/* ----- avisos no celular para o cliente ----- */
+function cardAvisosCliente() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !window.Notification) {
+    return /iPhone|iPad/.test(navigator.userAgent) && !matchMedia('(display-mode: standalone)').matches
+      ? `<div class="card avisos-cli" style="margin-bottom:12px"><b>🔔 Quer receber avisos do seu horário?</b><p class="mut small">No iPhone: toque em Compartilhar → <b>Adicionar à Tela de Início</b>, abra pelo ícone e ative aqui.</p></div>` : '';
+  }
+  if (Notification.permission === 'granted') return '';
+  if (Notification.permission === 'denied') return `<div class="card avisos-cli" style="margin-bottom:12px"><b>🔕 Avisos bloqueados</b><p class="mut small">Para saber se seu horário for cancelado ou mudar, libere as notificações deste site (cadeado ao lado do endereço → Notificações → Permitir).</p></div>`;
+  return `<div class="card avisos-cli" style="margin-bottom:12px"><b>🔔 Receba avisos do seu horário</b><p class="mut small">Você é avisado no celular se ${esc(PUB.config.negocio)} confirmar seu sinal, mudar ou cancelar seu horário.</p><button class="btn sm" style="margin-top:8px" onclick="ativarAvisosCli()">Ativar avisos</button></div>`;
+}
+async function ativarAvisosCli() {
+  try {
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') { toast('Permissão de notificação não concedida'); return go(view, true); }
+    await inscreverAparelho(); toast('🔔 Avisos ativados!', 3000);
+    api('POST', '/api/push/teste').catch(() => { });
+    go(view, true);
+  } catch (e) { toast('Não foi possível ativar: ' + e.message, 4000); }
+}
+// Ao abrir: mostra se o estabelecimento cancelou algum horário futuro (uma vez por horário).
+async function checarCancelamentos() {
+  let meus; try { meus = (await api('GET', '/api/meus')).agendamentos; } catch { return; }
+  const k = 'agendapro_vistos_' + SLUG + '_' + me.id;
+  let vistos = []; try { vistos = JSON.parse(localStorage.getItem(k) || '[]'); } catch { }
+  const novos = meus.filter(a => a.status === 'cancelado' && a.canceladoPor && a.canceladoPor !== 'cliente' && a.data >= today() && !vistos.includes(a.id));
+  if (!novos.length) return;
+  try { localStorage.setItem(k, JSON.stringify([...vistos, ...novos.map(a => a.id)].slice(-50))); } catch { }
+  const a = novos[0];
+  openModal('❌ Horário cancelado', `<p><b>${esc(PUB.config.negocio)}</b> cancelou seu horário:</p>
+    <p style="margin:8px 0"><b>${esc(a.servicoNome)}</b><br>${DIAS[new Date(a.data + 'T12:00').getDay()]}, ${fmtData(a.data)} às ${a.hora}</p>
+    ${a.sinal && ['devolver', 'devolvido'].includes(a.sinal.status) ? `<p class="small">↩️ Seu sinal de ${brl(a.sinal.valor)} ${a.sinal.status === 'devolvido' ? 'foi devolvido' : 'será devolvido'}.</p>` : ''}
+    ${novos.length > 1 ? `<p class="mut small">E mais ${novos.length - 1} horário(s). Veja em Meus horários.</p>` : ''}
+    <button type="button" class="btn block" onclick="closeModal();ui.book={servicoId:'${a.servicoId}',profId:'${a.profId}'};go('agendar')">📅 Remarcar</button>
+    <button type="button" class="btn ghost block" style="margin-top:8px" onclick="closeModal()">Fechar</button>`);
+}
+
 // Tela do Pix do sinal: QR Code, copia e cola, chave e botão "Já paguei".
 function qrSvg(texto) {
   try { const q = qrcode(0, 'M'); q.addData(texto); q.make(); return q.createSvgTag({ cellSize: 5, margin: 2, scalable: true }); } catch { return ''; }
