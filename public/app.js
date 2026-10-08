@@ -105,14 +105,57 @@ function avisarNovidades(antes) {
   const msg = novos.length
     ? `📅 Novo agendamento: ${novos[0].clienteNome} — ${fmtData(novos[0].data)} às ${novos[0].hora}${novos.length > 1 ? ` (+${novos.length - 1})` : ''}`
     : `❌ ${cancel[0].clienteNome} cancelou ${fmtData(cancel[0].data)} às ${cancel[0].hora}`;
-  toast(msg, 6000); beep(); navigator.vibrate?.(200);
+  toast(msg, 6000); tocarSom(novos.length ? 'notificacao' : 'cancelado');
   if (document.hidden && window.Notification?.permission === 'granted') navigator.serviceWorker?.ready.then(r => r.showNotification('AgendaPro', { body: msg, icon: 'icons/icon-192.png' }));
 }
-function beep() {
-  try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    [880, 1320].forEach((f, i) => { const o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.value = f; o.connect(g); g.connect(ctx.destination); g.gain.setValueAtTime(.15, ctx.currentTime + i * .18); g.gain.exponentialRampToValueAtTime(.001, ctx.currentTime + i * .18 + .16); o.start(ctx.currentTime + i * .18); o.stop(ctx.currentTime + i * .18 + .17); });
-  } catch { }
+/* ----- sons (gerados no próprio app, sem arquivos) ----- */
+const SOM_KEY = 'agendapro_som';
+const somLigado = () => { try { return localStorage.getItem(SOM_KEY) !== '0'; } catch { return true; } };
+let audioCtx = null, ultimoSom = 0;
+function ctxAudio() {
+  try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); if (audioCtx.state === 'suspended') audioCtx.resume(); } catch { }
+  return audioCtx;
+}
+// O navegador só libera o som depois do primeiro toque na tela.
+['pointerdown', 'keydown', 'touchstart'].forEach(ev => addEventListener(ev, () => ctxAudio(), { once: true, passive: true }));
+function nota(ctx, freq, ini, dur, vol = .18, tipo = 'sine') {
+  const o = ctx.createOscillator(), g = ctx.createGain(), t = ctx.currentTime + ini;
+  o.type = tipo; o.frequency.setValueAtTime(freq, t);
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + .012); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + dur + .02);
+}
+function tocarSom(tipo = 'notificacao', forcar) {
+  if (!forcar && (!somLigado() || Date.now() - ultimoSom < 2500)) return;
+  const ctx = ctxAudio(); if (!ctx) return;
+  ultimoSom = Date.now();
+  if (tipo === 'concluido') {
+    // "plim-plim" de caixa: moedinhas subindo + brilho
+    [[1318.5, 0], [1760, .09], [2637, .18]].forEach(([f, t]) => { nota(ctx, f, t, .5, .16, 'triangle'); nota(ctx, f * 2, t, .25, .04); });
+    nota(ctx, 523.25, 0, .35, .1, 'sine'); nota(ctx, 783.99, .18, .6, .08, 'sine');
+    navigator.vibrate?.([60, 40, 60]);
+  } else if (tipo === 'cancelado') {
+    [[659.25, 0], [523.25, .16], [392, .32]].forEach(([f, t]) => nota(ctx, f, t, .35, .16, 'triangle'));
+    navigator.vibrate?.([200, 80, 200]);
+  } else {
+    // notificação: campainha de 3 notas (dó–mi–sol agudo)
+    [[1046.5, 0], [1318.5, .13], [1568, .26]].forEach(([f, t]) => { nota(ctx, f, t, .55, .17, 'sine'); nota(ctx, f * 2, t, .3, .035, 'sine'); });
+    navigator.vibrate?.([120, 60, 120]);
+  }
+}
+const beep = () => tocarSom('notificacao');
+// Notificação push com o app aberto: o service worker avisa e o app toca o som.
+navigator.serviceWorker?.addEventListener('message', e => {
+  const d = e.data || {}; if (d.tipo !== 'push') return;
+  tocarSom(/cancel/i.test(d.title || '') ? 'cancelado' : 'notificacao');
+  if (!document.hidden) toast(`${d.title || ''}${d.body ? ' — ' + d.body.split('\n')[0] : ''}`, 5000);
+  if (staff()) poll(); else if (me?.role === 'cliente' && view === 'meus') vMeus();
+});
+function cardSom() {
+  return `<div class="card" style="margin-top:12px"><h3>🔊 Sons</h3>
+    <p class="mut small">Toca um som quando chega agendamento ou aviso com o app aberto, e um "plim" de caixa ao concluir um atendimento. Com o app fechado, toca o som de notificação do celular.</p>
+    <label style="margin-top:8px"><input type="checkbox" ${somLigado() ? 'checked' : ''} onchange="try{localStorage.setItem(SOM_KEY,this.checked?'1':'0')}catch{};this.checked&&tocarSom('notificacao',1)" style="width:auto;margin-right:6px">Sons ligados neste aparelho</label>
+    <div class="acts" style="margin-top:8px"><button type="button" class="btn ghost sm" onclick="tocarSom('notificacao',1)">▶ Notificação</button><button type="button" class="btn ghost sm" onclick="tocarSom('concluido',1)">▶ Atendimento concluído</button><button type="button" class="btn ghost sm" onclick="tocarSom('cancelado',1)">▶ Cancelamento</button></div>
+  </div>`;
 }
 
 let pollT = null;
@@ -625,7 +668,7 @@ function concluir(id) {
     const cobrado = num(f.valor);
     a.status = 'concluido'; a.valor = Math.round((cobrado + sinalPago) * 100) / 100; a.pagamento = f.pag;
     if (cobrado > 0 || !sinalPago) lancar('entrada', `${a.servicoNome} — ${a.clienteNome}${sinalPago ? ' (restante)' : ''}`, cobrado, 'Serviço', a.data < today() ? a.data : today(), a.id, f.pag);
-    save(); toast('Atendimento concluído'); go(view, true);
+    save(); tocarSom('concluido', 1); toast('✅ Atendimento concluído'); go(view, true);
   });
 }
 function cancelarAg(id) {
@@ -658,7 +701,7 @@ function sinalRecebido(id) {
   if (!confirm(`Confirmar que o Pix de ${brl(a.sinal.valor)} de ${a.clienteNome} caiu na sua conta?`)) return;
   a.sinal.status = 'pago'; a.sinal.pagoEm = new Date().toISOString();
   lancar('entrada', `Sinal ${a.servicoNome} — ${a.clienteNome}`, a.sinal.valor, 'Serviço', today(), a.id, 'Pix');
-  save(); toast('Sinal confirmado e lançado no financeiro'); go(view, true);
+  save(); tocarSom('concluido', 1); toast('Sinal confirmado e lançado no financeiro'); go(view, true);
 }
 function sinalDevolvido(id) {
   const a = byId('agendamentos', id);
@@ -971,6 +1014,7 @@ function vConfig() {
         <div class="acts" style="margin-top:10px">${'PushManager' in window ? `<button class="btn sm" onclick="ativarPush()">${window.Notification?.permission === 'granted' ? 'Reativar neste aparelho' : 'Ativar neste aparelho'}</button><button class="btn ghost sm" id="btnTeste" onclick="testarPush()">Enviar teste</button>` : ''}</div>
         <p class="small" id="pushRes" style="margin-top:10px"></p>
       </div>
+      ${cardSom()}
       <div class="card" style="margin-top:12px"><h3>Horário de atendimento</h3>
         <form id="fc">
           <label>Nicho</label><input value="${esc((NICHOS[c.nicho] || {}).icon + ' ' + (NICHOS[c.nicho] || {}).label)}" disabled>
@@ -1556,6 +1600,9 @@ function vPerfilFunc() {
     <form id="fp"><label>Nova senha</label><input type="password" name="senha" minlength="4" required autocomplete="new-password">
       <button class="btn block">Trocar senha</button></form>
     <button class="btn ghost block" onclick="Tour.iniciar('funcionario')">🎓 Ver tutorial</button>
+  </div>
+  <div style="max-width:480px">${cardSom()}</div>
+  <div class="card" style="max-width:480px;margin-top:12px">
     <button class="btn ghost block" onclick="logout()">Sair</button>
   </div>`);
   $('#fp').onsubmit = async e => {

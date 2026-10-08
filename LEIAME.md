@@ -51,6 +51,11 @@ Na Central você:
 - Regra de cancelamento (mostrada ao cliente): cancelou **até o dia anterior** → o sinal é devolvido (você recebe o aviso "Devolver sinal" e marca **Já devolvi**, que lança a saída). Cancelou **no dia** → o sinal **não** é devolvido; para remarcar, ele faz um novo agendamento e paga o sinal de novo.
 - Você recebe notificação quando o cliente agenda, informa o Pix e cancela (dizendo se precisa devolver).
 
+## Sons
+- Com o app aberto: campainha de 3 notas quando chega agendamento ou aviso, som descendente para cancelamento e um "plim" de caixa ao **concluir atendimento** (e ao confirmar o sinal).
+- Com o app fechado: a notificação toca o som e vibra conforme o som de notificação do celular.
+- Ajustes → **🔊 Sons** (funcionário: Perfil): ligar/desligar neste aparelho e ouvir cada som.
+
 ## Avisos para o cliente
 - Em **Meus horários** o cliente toca em **Ativar avisos** e passa a receber notificação no celular quando você **cancela**, **muda o horário**, **confirma o sinal** ou **devolve o sinal**.
 - Quando você cancela, aparece também o botão **💬 Avisar no WhatsApp** com a mensagem pronta (e dizendo se o sinal será devolvido).

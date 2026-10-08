@@ -1,4 +1,4 @@
-const CACHE = 'agendapro-v13';
+const CACHE = 'agendapro-v14';
 const ASSETS = ['/index.html', '/app.js', '/nichos.js', '/assinar.js', '/tour.js', '/qrcode.js', '/style.css', '/icons/icon-192.png', '/icons/icon-512.png'];
 
 self.addEventListener('install', e => {
@@ -22,13 +22,19 @@ self.addEventListener('fetch', e => {
   );
 });
 
-// Notificações de novos agendamentos
+// Notificações (agendamentos, cancelamentos, avisos ao cliente).
+// Com o app aberto e na tela, o próprio app toca o som e mostra o aviso; senão, notificação do sistema com som e vibração.
 self.addEventListener('push', e => {
   let d = {};
   try { d = e.data.json(); } catch { d = { title: 'AgendaPro', body: e.data ? e.data.text() : '' }; }
-  e.waitUntil(self.registration.showNotification(d.title || 'AgendaPro', {
-    body: d.body || '', icon: '/icons/icon-192.png', badge: '/icons/icon-192.png',
-    tag: 'agendapro-' + Date.now(), vibrate: [200, 100, 200], data: { url: d.url || './' }
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(ws => {
+    ws.forEach(w => w.postMessage({ tipo: 'push', title: d.title, body: d.body }));
+    if (ws.some(w => w.visibilityState === 'visible' && w.focused)) return;
+    return self.registration.showNotification(d.title || 'AgendaPro', {
+      body: d.body || '', icon: '/icons/icon-192.png', badge: '/icons/icon-192.png',
+      tag: 'agendapro-' + Date.now(), renotify: true, silent: false, requireInteraction: false,
+      vibrate: [200, 100, 200, 100, 300], data: { url: d.url || './' }
+    });
   }));
 });
 self.addEventListener('notificationclick', e => {
