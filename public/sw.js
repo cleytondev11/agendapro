@@ -1,4 +1,4 @@
-const CACHE = 'agendapro-v14';
+const CACHE = 'agendapro-v15';
 const ASSETS = ['/index.html', '/app.js', '/nichos.js', '/assinar.js', '/tour.js', '/qrcode.js', '/style.css', '/icons/icon-192.png', '/icons/icon-512.png'];
 
 self.addEventListener('install', e => {
@@ -13,7 +13,7 @@ self.addEventListener('activate', e => {
 // Rede primeiro (sempre a versão mais nova); cache só quando estiver sem internet. A API nunca é cacheada.
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
-  if (e.request.method !== 'GET' || url.origin !== location.origin || url.pathname.startsWith('/api/')) return;
+  if (e.request.method !== 'GET' || url.origin !== location.origin || url.pathname.startsWith('/api/') || url.pathname.endsWith('.mp4') || e.request.headers.has('range')) return;
   e.respondWith(
     fetch(e.request).then(res => {
       if (res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(e.request, copy)); }

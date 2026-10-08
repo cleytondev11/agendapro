@@ -144,4 +144,5 @@ Sem `DATABASE_URL`, os dados ficam na pasta `data/`. Defina `DATA_DIR` para muda
 - `public/` — o app (PWA): `index.html`, `app.js`, `style.css`, `sw.js`, ícones
 - `public/central.html` + `central.js` — a Central de Acessos
 - `public/nichos.js` — serviços e produtos padrão de cada nicho
+- `public/tutorial.mp4` + `tutorial.jpg` — vídeo tutorial (aparece no site, seção **Vídeo**)
 - `public/site.html` — site de vendas. Para mostrar o preço, edite `preco: ''` no fim do arquivo (hoje: `preco: '49,90'`)

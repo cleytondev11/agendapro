@@ -847,7 +847,7 @@ route('GET', '/api/central/empresas/:slug/backup', 'central', (req, b, p) => {
 });
 
 /* ================= http ================= */
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json', '.mp4': 'video/mp4', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' };
 
 function send(res, status, obj) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -909,8 +909,20 @@ function serveStatic(req, res, pathname) {
   else if (seg.length === 1 && !seg[0].includes('.')) return paginaEmpresa(res, seg[0]);
   const file = path.normalize(path.join(PUBLIC, decodeURIComponent(pathname)));
   if (!file.startsWith(PUBLIC + path.sep) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) { res.writeHead(404, { 'Content-Type': 'text/plain' }); return res.end('Não encontrado'); }
-  const ext = path.extname(file);
-  res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': ['.html', '.js', '.css', '.json'].includes(ext) ? 'no-cache' : 'public, max-age=604800' });
+  const ext = path.extname(file), size = fs.statSync(file).size;
+  const head = { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': ['.html', '.js', '.css', '.json'].includes(ext) ? 'no-cache' : 'public, max-age=604800', 'Accept-Ranges': 'bytes' };
+  // Vídeo: responde por partes (Range) — o iPhone exige isso para tocar.
+  const m = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
+  if (m && (m[1] || m[2])) {
+    let ini = m[1] ? +m[1] : size - +m[2], fim = m[1] && m[2] ? Math.min(+m[2], size - 1) : size - 1;
+    if (ini < 0) ini = 0;
+    if (ini >= size || ini > fim) { res.writeHead(416, { 'Content-Range': `bytes */${size}` }); return res.end(); }
+    res.writeHead(206, { ...head, 'Content-Range': `bytes ${ini}-${fim}/${size}`, 'Content-Length': fim - ini + 1 });
+    if (req.method === 'HEAD') return res.end();
+    return fs.createReadStream(file, { start: ini, end: fim }).pipe(res);
+  }
+  res.writeHead(200, { ...head, 'Content-Length': size });
+  if (req.method === 'HEAD') return res.end();
   fs.createReadStream(file).pipe(res);
 }
 
