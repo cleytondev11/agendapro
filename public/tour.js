@@ -134,6 +134,11 @@
       { el: () => campo('cep'), titulo: 'Endereço', texto: 'Digite o CEP que a rua, o bairro e a cidade são preenchidos sozinhos. Depois é só colocar o número.' },
       { el: doModal('.modal-foot .btn:last-child'), titulo: 'Salvar', texto: 'Quando terminar, toque em <b>Salvar</b>.', toque: 'Toque em "Salvar" quando terminar', espera: 60000 }
     ],
+    pix: () => [
+      { antes: async () => { await fecharModal(); await irPara('config')(); }, el: () => porTexto('Configurar Pix') || porTexto('Alterar Pix'), titulo: 'Pix e sinal', texto: 'Cadastre sua chave Pix e o cliente paga um sinal (ex.: 30% do serviço) para garantir o horário. Cancelou até o dia anterior, devolve; cancelou no dia, o sinal fica.', toque: 'Toque em "Configurar Pix"' },
+      { el: () => campo('chave'), titulo: 'Sua chave Pix', texto: 'Escolha o tipo, digite a chave, seu nome como está no banco e a cidade. O % padrão vale para todos os serviços (dá para mudar em cada um).' },
+      { el: doModal('.modal-foot .btn:last-child'), titulo: 'Salvar', texto: 'Toque em <b>Salvar</b>. Pronto: o QR Code do sinal aparece para o cliente quando ele agenda.', toque: 'Toque em "Salvar"', espera: 60000 }
+    ],
     horarios: () => [
       { antes: async () => { await fecharModal(); await irPara('config')(); }, el: () => $q('#fc'), titulo: 'Horário de atendimento', texto: 'Defina que horas abre e fecha, o intervalo entre horários e os dias que você atende. Os clientes só conseguem marcar dentro disso.' },
       { el: () => $q('#fc .btn.block'), titulo: 'Salvar', texto: 'Ajuste e toque em <b>Salvar ajustes</b>.', toque: 'Toque em "Salvar ajustes"' }
@@ -197,6 +202,7 @@
     ['equipe', '🧑‍💼', 'Criar usuário de funcionário', 'Cada um com a própria agenda.', () => S.users.some(u => u.role === 'func')],
     ['agendar', '📅', 'Marcar o primeiro horário', 'Como agendar pelo balcão.', () => S.agendamentos.length > 0],
     ['venda', '🛍️', 'Fazer uma venda', 'Produto, pagamento e estoque.', () => S.vendas.length > 0],
+    ['pix', '💠', 'Cobrar sinal no Pix', 'Cliente paga 30% para reservar.', () => !!(S.config.pix && S.config.pix.chave)],
     ['notificacoes', '🔔', 'Ativar notificações', 'Aviso a cada cliente que agendar.', () => window.Notification?.permission === 'granted'],
     ['link', '🔗', 'Enviar o link aos clientes', 'Para eles agendarem sozinhos.', () => false]
   ];

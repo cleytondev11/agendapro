@@ -1,5 +1,5 @@
-const CACHE = 'agendapro-v11';
-const ASSETS = ['/index.html', '/app.js', '/nichos.js', '/assinar.js', '/tour.js', '/style.css', '/icons/icon-192.png', '/icons/icon-512.png'];
+const CACHE = 'agendapro-v12';
+const ASSETS = ['/index.html', '/app.js', '/nichos.js', '/assinar.js', '/tour.js', '/qrcode.js', '/style.css', '/icons/icon-192.png', '/icons/icon-512.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));

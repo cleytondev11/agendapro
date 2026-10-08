@@ -234,7 +234,16 @@ function renderLogin(tab = 'entrar') {
       <label>Senha</label><input name="senha" type="password" required autocomplete="current-password">
       <div class="err" id="err"></div>
       <button class="btn block">Entrar</button>
-      <p class="mut small" style="margin-top:12px">Primeira vez? Toque em <b>Criar conta</b> para agendar seu horário.</p>
+      <p class="small" style="margin-top:12px;text-align:center"><a href="#" style="color:var(--ac)" onclick="renderLogin('esqueci');return false">Esqueci minha senha</a></p>
+      <p class="mut small" style="margin-top:8px">Primeira vez? Toque em <b>Criar conta</b> para agendar seu horário.</p>
+    </form>` : tab === 'esqueci' ? `
+    <form id="f">
+      <h3 style="margin:4px 0 6px">🔑 Recuperar senha</h3>
+      <p class="mut small">Informe o telefone do seu cadastro. Avisamos ${esc(c.negocio)} e você recebe uma nova senha no seu WhatsApp.</p>
+      <label>Telefone / WhatsApp</label><input name="tel" required inputmode="tel" autocomplete="tel" placeholder="(61) 90000-0000">
+      <div class="err" id="err"></div>
+      <button class="btn block">Pedir nova senha</button>
+      <p class="small" style="margin-top:12px;text-align:center"><a href="#" style="color:var(--ac)" onclick="renderLogin('entrar');return false">← Voltar para Entrar</a></p>
     </form>` : `
     <form id="f">
       <label>Nome completo</label><input name="nome" required autocomplete="name">
@@ -245,10 +254,22 @@ function renderLogin(tab = 'entrar') {
       <p class="mut small" style="margin-top:10px">Nas próximas vezes, entre com seu telefone e essa senha.</p>
     </form>`}
   </div></div>`;
+  if (tab === 'esqueci') { const t = $('#f [name=tel]'); t.addEventListener('input', () => { t.value = mascTel(t.value); }); }
   $('#f').onsubmit = async e => {
     e.preventDefault();
     const f = Object.fromEntries(new FormData(e.target)), btn = e.target.querySelector('.btn');
     btn.disabled = true;
+    if (tab === 'esqueci') {
+      try {
+        const r = await api('POST', '/api/esqueci', f);
+        const msg = `Olá! Esqueci minha senha do app de agendamento de ${c.negocio}. Meu telefone de cadastro é ${f.tel}. Pode me enviar uma nova senha?`;
+        $('#f').innerHTML = `<h3 style="margin:4px 0 6px">✅ Pedido enviado</h3>
+          <p class="small">${r.encontrado ? `Avisamos <b>${esc(c.negocio)}</b>. Você vai receber uma <b>nova senha no seu WhatsApp</b>. Depois é só entrar com seu telefone e a senha nova (e trocar em Perfil, se quiser).` : `Não encontramos cadastro com esse telefone. Confira o número ou toque em <b>Criar conta</b>.`}</p>
+          ${r.whats ? `<a class="btn block" style="margin-top:12px" target="_blank" rel="noopener" href="https://wa.me/${r.whats}?text=${encodeURIComponent(msg)}">💬 Chamar no WhatsApp agora</a>` : ''}
+          <button type="button" class="btn ghost block" style="margin-top:8px" onclick="renderLogin('entrar')">Voltar para Entrar</button>`;
+      } catch (err) { $('#err').textContent = err.message; btn.disabled = false; }
+      return;
+    }
     try {
       const r = await api('POST', tab === 'entrar' ? '/api/login' : '/api/register', f);
       setToken(r.token); boot();
@@ -384,6 +405,7 @@ function vDashboard() {
 
   shell('Dashboard', `<button class="btn ghost" onclick="formMetas()">🎯 Metas</button><button class="btn" onclick="novoAgendamento()">+ Agendamento</button>`, `
   ${window.Tour ? Tour.blocoPassos() : ''}
+  ${blocoPendencias()}
   ${blocoMetas()}
   <div class="grid kpis">
     <div class="card kpi"><div class="l">Faturamento hoje</div><div class="v">${brl(entHoje)}</div><div class="s">${agHoje.length} atendimento(s) hoje</div></div>
@@ -412,6 +434,18 @@ function vDashboard() {
 }
 
 /* ----- metas do mês ----- */
+function blocoPendencias() {
+  const conf = S.agendamentos.filter(a => a.status === 'agendado' && a.sinal?.status === 'informado');
+  const dev = S.agendamentos.filter(a => a.sinal?.status === 'devolver');
+  const senha = S.users.filter(u => u.role === 'cliente' && u.pedidoSenha);
+  if (!conf.length && !dev.length && !senha.length) return '';
+  const item = (ic, t, d, acao) => `<div class="item"><div class="grow"><div class="t">${ic} ${t}</div><div class="d">${d}</div></div>${acao}</div>`;
+  return `<div class="card pend" style="margin-bottom:12px"><h3>⚡ Precisa da sua atenção</h3><div class="list">
+    ${conf.map(a => item('🧾', `${esc(a.clienteNome)} informou o Pix do sinal`, `${brl(a.sinal.valor)} · ${esc(a.servicoNome)} · ${fmtData(a.data)} ${a.hora}`, `<button class="btn ok sm" onclick="sinalRecebido('${a.id}')">✓ Recebido</button>`)).join('')}
+    ${dev.map(a => item('↩️', `Devolver sinal para ${esc(a.clienteNome)}`, `${brl(a.sinal.valor)} · cancelou ${fmtData(a.data)} ${a.hora} com antecedência`, `<button class="btn sm" onclick="sinalDevolvido('${a.id}')">Já devolvi</button>`)).join('')}
+    ${senha.map(u => item('🔑', `${esc(u.nome)} esqueceu a senha`, esc(u.tel || ''), `<button class="btn sm" onclick="enviarNovaSenha('${u.id}')">Enviar nova</button>`)).join('')}
+  </div></div>`;
+}
 function diasUteisMes(mes) {
   const [y, m] = mes.split('-').map(Number), total = new Date(y, m, 0).getDate(), hoje = today(), dias = S.config.dias;
   let tot = 0, passados = 0, restantes = 0;
@@ -529,6 +563,7 @@ function vAgenda() {
           <div class="ag-top"><b>${esc(a.clienteNome)}</b>${tagApp(a)}<span class="pill ${a.status}">${a.status}</span></div>
           <div class="d">${esc(a.servicoNome)} · <b style="color:var(--tx)">${brl(a.valor)}</b></div>
           ${extra ? `<div class="d">${extra}</div>` : ''}
+          ${linhaSinal(a)}
           ${a.status === 'agendado' || wa ? `<div class="ag-acts">
             ${a.status === 'agendado' ? `<button class="btn ok sm" onclick="concluir('${a.id}')">✓ Concluir</button><button class="btn ghost sm" onclick="novoAgendamento('${a.id}')">Editar</button><button class="btn ghost sm" onclick="cancelarAg('${a.id}')">Cancelar</button>` : ''}
             ${wa ? `<a class="btn ghost sm" target="_blank" rel="noopener" href="${wa}">💬 WhatsApp</a>` : ''}
@@ -576,21 +611,54 @@ function novoAgendamento(id) {
 
 function concluir(id) {
   const a = byId('agendamentos', id);
+  const sinalPago = a.sinal && a.sinal.status === 'pago' ? a.sinal.valor : 0;
+  const resto = Math.max(0, Math.round((a.valor - sinalPago) * 100) / 100);
   openModal('Concluir atendimento', `
   <form>
-    <p class="mut">${esc(a.clienteNome)} · ${esc(a.servicoNome)}</p>
-    <div class="row"><div><label>Valor cobrado</label><input name="valor" inputmode="decimal" value="${a.valor}"></div>
+    <p class="mut">${esc(a.clienteNome)} · ${esc(a.servicoNome)} · ${brl(a.valor)}</p>
+    ${sinalPago ? `<p class="small" style="margin:6px 0">💠 Sinal de <b>${brl(sinalPago)}</b> já recebido e lançado. Cobre só o restante.</p>` : a.sinal && a.sinal.status === 'informado' ? `<p class="small" style="margin:6px 0">🧾 O cliente informou o Pix do sinal (${brl(a.sinal.valor)}), mas você ainda não confirmou. Confirme em <b>✓ Sinal recebido</b> antes, se já caiu na sua conta.</p>` : ''}
+    <div class="row"><div><label>${sinalPago ? 'Valor cobrado agora (restante)' : 'Valor cobrado'}</label><input name="valor" inputmode="decimal" value="${resto}"></div>
       <div><label>Forma de pagamento</label><select name="pag">${PAGTOS.map(p => `<option>${p}</option>`).join('')}</select></div></div>
     ${foot('Concluir e lançar')}
   </form>`, f => {
-    a.status = 'concluido'; a.valor = num(f.valor); a.pagamento = f.pag;
-    lancar('entrada', `${a.servicoNome} — ${a.clienteNome}`, a.valor, 'Serviço', a.data < today() ? a.data : today(), a.id, f.pag);
+    const cobrado = num(f.valor);
+    a.status = 'concluido'; a.valor = Math.round((cobrado + sinalPago) * 100) / 100; a.pagamento = f.pag;
+    if (cobrado > 0 || !sinalPago) lancar('entrada', `${a.servicoNome} — ${a.clienteNome}${sinalPago ? ' (restante)' : ''}`, cobrado, 'Serviço', a.data < today() ? a.data : today(), a.id, f.pag);
     save(); toast('Atendimento concluído'); go(view, true);
   });
 }
 function cancelarAg(id) {
-  if (!confirm('Cancelar este agendamento?')) return;
-  byId('agendamentos', id).status = 'cancelado'; save(); go(view, true);
+  const a = byId('agendamentos', id);
+  const pago = a.sinal && ['pago', 'informado'].includes(a.sinal.status);
+  if (!confirm(pago ? `Cancelar este agendamento?\n\nO cliente já pagou o sinal de ${brl(a.sinal.valor)}. Como foi você que cancelou, ele fica marcado para devolver.` : 'Cancelar este agendamento?')) return;
+  a.status = 'cancelado';
+  if (a.sinal) a.sinal.status = pago ? 'devolver' : a.sinal.status === 'pendente' ? 'nao-pago' : a.sinal.status;
+  save(); go(view, true);
+}
+/* ----- sinal (Pix) dos agendamentos ----- */
+const SINAL_TXT = { pendente: '⏳ aguardando Pix', informado: '🧾 cliente informou o pagamento — confira', pago: '✅ sinal recebido', devolver: '↩️ DEVOLVER ao cliente', devolvido: '↩️ devolvido ao cliente', retido: '🔒 não devolvido (cancelou no dia)', 'nao-pago': 'não foi pago' };
+const POLITICA_SINAL = 'Cancelando até o dia anterior ao horário, o sinal é devolvido. Cancelando no dia do horário, o sinal não é devolvido: para remarcar, faça um novo agendamento e pague o sinal novamente.';
+function linhaSinal(a) {
+  const s = a.sinal; if (!s) return '';
+  const btns = [];
+  if (a.status === 'agendado' && ['pendente', 'informado'].includes(s.status)) btns.push(`<button class="btn ok sm" onclick="sinalRecebido('${a.id}')">✓ Sinal recebido</button>`);
+  if (s.status === 'devolver' && me.role === 'admin') btns.push(`<button class="btn sm" onclick="sinalDevolvido('${a.id}')">↩️ Já devolvi</button>`);
+  return `<div class="sinal-line ${s.status}"><span>💠 Sinal ${brl(s.valor)} (${s.pct}%) · ${SINAL_TXT[s.status] || s.status}</span>${btns.length ? `<div class="acts">${btns.join('')}</div>` : ''}</div>`;
+}
+function sinalRecebido(id) {
+  const a = byId('agendamentos', id);
+  if (!confirm(`Confirmar que o Pix de ${brl(a.sinal.valor)} de ${a.clienteNome} caiu na sua conta?`)) return;
+  a.sinal.status = 'pago'; a.sinal.pagoEm = new Date().toISOString();
+  lancar('entrada', `Sinal ${a.servicoNome} — ${a.clienteNome}`, a.sinal.valor, 'Serviço', today(), a.id, 'Pix');
+  save(); toast('Sinal confirmado e lançado no financeiro'); go(view, true);
+}
+function sinalDevolvido(id) {
+  const a = byId('agendamentos', id);
+  if (!confirm(`Confirmar que você devolveu ${brl(a.sinal.valor)} para ${a.clienteNome}?`)) return;
+  const lancado = S.lancamentos.some(l => l.ref === a.id && l.tipo === 'entrada' && /^Sinal /.test(l.descricao || ''));
+  a.sinal.status = 'devolvido'; a.sinal.devolvidoEm = new Date().toISOString();
+  if (lancado) lancar('saida', `Devolução de sinal — ${a.clienteNome}`, a.sinal.valor, 'Outros', today(), a.id, 'Pix');
+  save(); toast('Devolução registrada'); go(view, true);
 }
 
 /* ----- vendas ----- */
@@ -783,12 +851,12 @@ function baixar(nome, conteudo, tipo) {
 /* ----- clientes ----- */
 function vClientes() {
   const q = ui.busca.toLowerCase();
-  const cli = S.users.filter(u => u.role === 'cliente' && (u.nome.toLowerCase().includes(q) || (u.tel || '').includes(q))).sort((a, b) => a.nome.localeCompare(b.nome));
+  const cli = S.users.filter(u => u.role === 'cliente' && (u.nome.toLowerCase().includes(q) || (u.tel || '').includes(q))).sort((a, b) => (b.pedidoSenha ? 1 : 0) - (a.pedidoSenha ? 1 : 0) || a.nome.localeCompare(b.nome));
   const stats = id => { const ag = S.agendamentos.filter(a => a.clienteId === id && a.status === 'concluido'); return { n: ag.length, tot: ag.reduce((s, a) => s + a.valor, 0), ult: ag.map(a => a.data).sort().pop() }; };
   shell('Clientes', `<button class="btn" onclick="formCliente()">+ Cliente</button>`, `
   <div class="filters"><input placeholder="Buscar por nome ou telefone…" value="${esc(ui.busca)}" oninput="buscar(this.value,vClientes)"></div>
   <div class="card">${cli.length ? `<div class="list">${cli.map(c => { const s = stats(c.id); return `
-    <div class="item"><div class="grow"><div class="t">${esc(c.nome)}${c.hasSenha ? ' <span class="pill app">📱 usa o app</span>' : ''}</div><div class="d">${esc(c.tel || '')} · ${s.n} visita(s) · ${brl(s.tot)}${s.ult ? ' · última ' + fmtData(s.ult) : ''}</div></div>
+    <div class="item"><div class="grow"><div class="t">${esc(c.nome)}${c.hasSenha ? ' <span class="pill app">📱 usa o app</span>' : ''}${c.pedidoSenha ? ` <button class="pill baixo" style="cursor:pointer;border:0" onclick="enviarNovaSenha('${c.id}')">🔑 pediu nova senha</button>` : ''}</div><div class="d">${esc(c.tel || '')} · ${s.n} visita(s) · ${brl(s.tot)}${s.ult ? ' · última ' + fmtData(s.ult) : ''}</div></div>
     ${c.tel ? `<a class="icon-btn" target="_blank" rel="noopener" href="https://wa.me/55${c.tel.replace(/\D/g, '').replace(/^55(?=\d{10,11}$)/, '')}">💬</a>` : ''}
     <button class="icon-btn" onclick="formCliente('${c.id}')">✏️</button></div>`; }).join('')}</div>` : '<div class="empty">Nenhum cliente ainda. Envie o link de agendamento (em Ajustes) para seus clientes se cadastrarem.</div>'}</div>`);
 }
@@ -798,7 +866,9 @@ function formCliente(id) {
   <form>
     <label>Nome</label><input name="nome" required value="${esc(c?.nome || '')}">
     <label>Telefone / WhatsApp</label><input name="tel" required inputmode="tel" value="${esc(c?.tel || '')}">
+    ${c?.pedidoSenha ? `<p class="small" style="margin-top:8px">🔑 Este cliente <b>esqueceu a senha</b> e pediu uma nova.</p>` : ''}
     <label>Senha de acesso ao app <span class="mut">(opcional${c?.hasSenha ? ', deixe vazio para manter' : ''})</span></label><input name="senha" type="password" minlength="4" autocomplete="new-password">
+    ${c && c.tel ? `<button type="button" class="btn ghost sm" style="margin-top:8px" onclick="closeModal();enviarNovaSenha('${c.id}')">🎲 Gerar nova senha e enviar no WhatsApp</button>` : ''}
     <label>Anotações</label><textarea name="obs" rows="2">${esc(c?.obs || '')}</textarea>
     <label><input type="checkbox" name="bloq" ${c?.bloqueado ? 'checked' : ''} style="width:auto;margin-right:6px">Bloquear acesso ao app</label>
     <div class="err" id="mErr"></div>
@@ -814,12 +884,27 @@ function formCliente(id) {
   });
 }
 
+function enviarNovaSenha(id) {
+  const c = byId('users', id); if (!c) return;
+  const senha = String(Math.floor(100000 + Math.random() * 900000));
+  const tel = soDig(c.tel).replace(/^55(?=\d{10,11}$)/, '');
+  const msg = `Olá ${c.nome.split(' ')[0]}! Sua nova senha do app de agendamento de ${S.config.negocio} é: *${senha}*\n\nEntre em ${location.origin}/${SLUG} com seu telefone e essa senha. Se quiser, troque depois em Perfil.`;
+  c.novaSenha = senha; delete c.pedidoSenha; c.hasSenha = true;
+  save();
+  openModal('🔑 Nova senha criada', `<p>Nova senha de <b>${esc(c.nome)}</b>:</p>
+    <div class="pix-code" style="font-size:1.6rem;text-align:center;letter-spacing:4px">${senha}</div>
+    <p class="mut small" style="margin-top:8px">A senha antiga deixou de valer. Envie a nova para o cliente:</p>
+    <a class="btn block" style="margin-top:10px" target="_blank" rel="noopener" href="https://wa.me/55${tel}?text=${encodeURIComponent(msg)}" onclick="setTimeout(closeModal,300)">💬 Enviar no WhatsApp</a>`);
+  if (view === 'clientes') vClientes();
+}
+
 /* ----- serviços ----- */
 function vServicos() {
   shell('Serviços', `<button class="btn" onclick="formServico()">+ Serviço</button>`, `
   <p class="mut small" style="margin-bottom:10px">Os serviços ativos aparecem para os clientes na tela de agendamento.</p>
+  ${pixAtivo() ? '' : `<div class="card" style="margin-bottom:12px"><b>💠 Cobrar sinal no Pix ao agendar</b><p class="mut small">Ative em Ajustes → Pix e sinal. O cliente paga ${S.config.pix?.sinalPadrao ?? 30}% do serviço para reservar o horário.</p><button class="btn sm" style="margin-top:8px" onclick="formPix()">Configurar Pix</button></div>`}
   <div class="card"><div class="list">${S.servicos.map(s => `
-    <div class="item"><div class="grow"><div class="t">${esc(s.nome)} ${s.ativo === false ? '<span class="pill">inativo</span>' : ''}</div><div class="d">${s.duracao} min</div></div>
+    <div class="item"><div class="grow"><div class="t">${esc(s.nome)} ${s.ativo === false ? '<span class="pill">inativo</span>' : ''}</div><div class="d">${s.duracao} min${pixAtivo() && pctServ(s) ? ` · sinal ${pctServ(s)}% (${brl(s.preco * pctServ(s) / 100)})` : ''}</div></div>
     <b>${brl(s.preco)}</b><button class="icon-btn" onclick="formServico('${s.id}')">✏️</button></div>`).join('') || '<div class="empty">Nenhum serviço.</div>'}</div></div>`);
 }
 function formServico(id) {
@@ -829,10 +914,13 @@ function formServico(id) {
     <label>Nome</label><input name="nome" required value="${esc(s?.nome || '')}">
     <div class="row"><div><label>Preço</label><input name="preco" inputmode="decimal" required value="${s?.preco ?? ''}"></div>
     <div><label>Duração (min)</label><input name="dur" type="number" min="5" step="5" required value="${s?.duracao ?? 30}"></div></div>
+    <label>Sinal no Pix para reservar (%) <span class="mut">(vazio = padrão de ${S.config.pix?.sinalPadrao ?? 30}%, 0 = sem sinal)</span></label>
+    <input name="sinal" type="number" min="0" max="100" step="1" inputmode="numeric" value="${s?.sinal ?? ''}" placeholder="${S.config.pix?.sinalPadrao ?? 30}">
+    ${pixAtivo() ? '' : '<p class="mut small">O sinal só é cobrado depois de ativar o Pix em Ajustes → Pix e sinal.</p>'}
     <label><input type="checkbox" name="ativo" ${s?.ativo === false ? '' : 'checked'} style="width:auto;margin-right:6px">Disponível para agendamento</label>
     ${foot()}
   </form>`, f => {
-    const d = { nome: f.nome.trim(), preco: num(f.preco), duracao: parseInt(f.dur) || 30, ativo: !!f.ativo };
+    const d = { nome: f.nome.trim(), preco: num(f.preco), duracao: parseInt(f.dur) || 30, ativo: !!f.ativo, sinal: f.sinal === '' ? null : Math.max(0, Math.min(100, parseInt(f.sinal) || 0)) };
     if (s) Object.assign(s, d); else S.servicos.push({ id: uid(), ...d });
     window.Tour && Tour.marcar('servicos');
     save(); vServicos();
@@ -863,6 +951,11 @@ function vConfig() {
         <p class="mut small">Envie este link. O cliente cria a conta com o telefone, agenda de casa e o horário aparece aqui na hora.</p>
         <div class="share"><input id="lnk" value="${esc(link)}" readonly><button class="btn sm" onclick="copiar()">Copiar</button></div>
         <div class="acts" style="margin-top:10px"><a class="btn ghost sm" target="_blank" rel="noopener" onclick="window.Tour && Tour.marcar('link')" href="https://wa.me/?text=${encodeURIComponent(convite)}">💬 Enviar no WhatsApp</a></div>
+      </div>
+      <div class="card" style="margin-top:12px"><h3>💠 Pix e sinal do agendamento</h3>
+        ${pixAtivo() ? `<p class="small">✅ Cobrando <b>${c.pix.sinalPadrao}%</b> de sinal (padrão) na chave <b>${esc(c.pix.chave)}</b>.</p><p class="mut small">Dá para mudar o % de cada serviço em Serviços.</p>`
+        : '<p class="mut small">Ao agendar, o cliente vê o QR Code e o Pix copia e cola com o valor do sinal (ex.: 30% do serviço) para garantir o horário.</p>'}
+        <div class="acts" style="margin-top:10px"><button class="btn sm" onclick="formPix()">${pixAtivo() ? 'Alterar' : 'Configurar'} Pix</button></div>
       </div>
       <div class="card" style="margin-top:12px"><h3>🔔 Notificações de novos agendamentos</h3>
         <p class="mut small">Aviso no celular quando um cliente agendar ou cancelar, mesmo com o app fechado. Ative em cada aparelho que você usa.</p>
@@ -917,6 +1010,37 @@ function vConfig() {
     save(); applyTheme(); toast('Ajustes salvos'); vConfig();
   };
 }
+/* ----- Pix do estabelecimento ----- */
+const pixAtivo = () => !!(S.config.pix && S.config.pix.ativo && S.config.pix.chave);
+const pctServ = sv => { const p = S.config.pix || {}; return sv.sinal === undefined || sv.sinal === null || sv.sinal === '' ? (p.sinalPadrao ?? 30) : +sv.sinal; };
+const TIPOS_PIX = [['cpf', 'CPF'], ['cnpj', 'CNPJ'], ['celular', 'Celular'], ['email', 'E-mail'], ['aleatoria', 'Chave aleatória']];
+function formPix() {
+  const c = S.config, p = c.pix || {}, e = c.empresa || {};
+  openModal('💠 Pix e sinal do agendamento', `
+  <form autocomplete="off">
+    <label style="margin-top:4px"><input type="checkbox" name="ativo" ${p.ativo || !p.chave ? 'checked' : ''} style="width:auto;margin-right:6px">Cobrar sinal no Pix quando o cliente agendar</label>
+    <div class="row">
+      <div><label>Tipo da chave</label><select name="tipo" id="pxTipo">${TIPOS_PIX.map(([v, l]) => `<option value="${v}" ${v === (p.tipo || 'celular') ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+      <div><label>Sinal padrão (%)</label><input name="sinalPadrao" type="number" min="1" max="100" required value="${p.sinalPadrao ?? 30}"></div>
+    </div>
+    <label>Sua chave Pix</label><input name="chave" id="pxChave" required value="${esc(p.chave || '')}" autocapitalize="none">
+    <label>Nome de quem recebe <span class="mut">(como está no banco)</span></label><input name="nome" required value="${esc(p.nome || '')}" placeholder="Seu nome ou da empresa">
+    <label>Cidade</label><input name="cidade" required value="${esc(p.cidade || e.cidade || '')}">
+    <p class="mut small" style="margin-top:10px">O cliente vê o QR Code e o código copia e cola já com o valor do sinal, e o botão <b>Já paguei</b> abre o seu WhatsApp para enviar o comprovante${soDig(e.telefone) ? '' : ' <b>(cadastre seu WhatsApp em Dados da empresa)</b>'}. Você confirma o recebimento na Agenda.</p>
+    <p class="mut small" style="margin-top:6px"><b>Regra de cancelamento mostrada ao cliente:</b> ${POLITICA_SINAL}</p>
+    <div class="err" id="mErr"></div>
+    ${foot()}
+  </form>`, f => {
+    const ch = f.chave.trim(), d = soDig(ch);
+    const ok = { cpf: () => cpfValido(ch), cnpj: () => d.length === 14, celular: () => d.length >= 10 && d.length <= 13, email: () => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(ch), aleatoria: () => /^[0-9a-f-]{32,36}$/i.test(ch) }[f.tipo];
+    if (!ok()) { $('#mErr').textContent = 'Chave Pix inválida para o tipo escolhido. Confira.'; return false; }
+    const pct = parseInt(f.sinalPadrao);
+    if (!(pct >= 1 && pct <= 100)) { $('#mErr').textContent = 'Sinal padrão entre 1% e 100%.'; return false; }
+    c.pix = { ativo: !!f.ativo, tipo: f.tipo, chave: ch, nome: f.nome.trim(), cidade: f.cidade.trim(), sinalPadrao: pct };
+    save(); toast(f.ativo ? 'Pix salvo. Sinal ativado!' : 'Pix salvo (sinal desligado)'); go(view);
+  });
+}
+
 /* ----- dados da empresa ----- */
 const soDig = v => String(v || '').replace(/\D/g, '');
 function enderecoTexto(e) {
@@ -1162,7 +1286,8 @@ function vAgendar() {
   <div class="chips">${dias.map(d => { const dt = new Date(d + 'T12:00'); return `<button class="chip ${d === b.data ? 'on' : ''}" onclick="ui.book.data='${d}';ui.book.hora='';vAgendar()"><small>${d === today() ? 'Hoje' : DIAS[dt.getDay()]}</small><b>${dt.getDate()}</b><small>${dt.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '')}</small></button>`; }).join('')}</div>
   <div class="step"><span class="n">${3 + passo}</span>Horário</div>
   ${!sv ? '<p class="mut">Escolha um serviço para ver os horários.</p>' : !livres ? '<div class="loading">Buscando horários livres…</div>' : livres.length ? `<div class="slots">${livres.map(h => `<button class="slot ${h === b.hora ? 'on' : ''}" onclick="ui.book.hora='${h}';vAgendar()">${h}</button>`).join('')}</div>` : '<p class="mut">Sem horários livres neste dia. Tente outro.</p>'}
-  ${sv && b.hora ? `<div class="card summary"><div class="item" style="padding:0"><div class="grow"><div class="t">${esc(sv.nome)} · ${brl(sv.preco)}</div><div class="d">${fmtData(b.data)} às ${b.hora}</div></div><button class="btn" id="btnConf" onclick="confirmarCliente()">Confirmar</button></div></div>` : ''}`, );
+  ${sv && b.hora ? `<div class="card summary"><div class="item" style="padding:0"><div class="grow"><div class="t">${esc(sv.nome)} · ${brl(sv.preco)}</div><div class="d">${fmtData(b.data)} às ${b.hora}</div></div><button class="btn" id="btnConf" onclick="confirmarCliente()">Confirmar</button></div>
+    ${sv.sinal ? `<div class="sinal-aviso"><b>💠 Sinal de ${brl(Math.round(sv.preco * sv.sinal) / 100)} (${sv.sinal}%) no Pix</b> para garantir o horário. O restante você paga no atendimento.<br><span class="mut">${POLITICA_SINAL}</span></div>` : ''}</div>` : ''}`, );
 }
 function cardLocal() {
   const e = empresaInfo(); if (!e || e.mostrarEndereco === false) return '';
@@ -1185,8 +1310,9 @@ async function carregarSlots(key) {
 async function confirmarCliente() {
   const b = ui.book, btn = $('#btnConf'); btn.disabled = true; btn.textContent = 'Enviando…';
   try {
-    await api('POST', '/api/agendar', { servicoId: b.servicoId, profId: b.profId, data: b.data, hora: b.hora });
+    const r = await api('POST', '/api/agendar', { servicoId: b.servicoId, profId: b.profId, data: b.data, hora: b.hora });
     ui.book = {}; ui.slots = {}; toast('Horário agendado! ✨'); go('meus');
+    if (r.agendamento && r.agendamento.pix) telaPix(r.agendamento, true);
   } catch (e) {
     toast(e.message, 4000); ui.slots = {}; b.hora = ''; vAgendar();
   }
@@ -1199,15 +1325,78 @@ async function vMeus() {
   meus.sort((a, b) => (b.data + b.hora).localeCompare(a.data + a.hora));
   const futuros = meus.filter(a => a.status === 'agendado' && a.data >= today()).reverse();
   const hist = meus.filter(a => !futuros.includes(a));
-  const linha = a => `<div class="item"><div class="hour">${a.hora}</div><div class="grow"><div class="t">${esc(a.servicoNome)}</div><div class="d">${DIAS[new Date(a.data + 'T12:00').getDay()]}, ${fmtData(a.data)} · ${brl(a.valor)}</div></div><span class="pill ${a.status}">${a.status}</span>
-    ${a.status === 'agendado' && a.data >= today() ? `<button class="btn ghost sm" onclick="cancelarCli('${a.id}')">Cancelar</button>` : ''}</div>`;
+  ui.meus = Object.fromEntries(meus.map(a => [a.id, a]));
+  const SIN_CLI = { pendente: '⏳ sinal aguardando pagamento', informado: '🧾 pagamento informado, aguardando confirmação', pago: '✅ sinal pago', devolver: '↩️ sinal será devolvido', devolvido: '↩️ sinal devolvido', retido: '🔒 sinal não devolvido (cancelado no dia)' };
+  const linha = a => `<div class="item meu"><div class="hour">${a.hora}</div><div class="grow"><div class="t">${esc(a.servicoNome)}</div><div class="d">${DIAS[new Date(a.data + 'T12:00').getDay()]}, ${fmtData(a.data)} · ${brl(a.valor)}</div>
+    ${a.sinal && SIN_CLI[a.sinal.status] ? `<div class="d">💠 Sinal ${brl(a.sinal.valor)} · ${SIN_CLI[a.sinal.status]}</div>` : ''}</div><span class="pill ${a.status}">${a.status}</span>
+    ${a.status === 'agendado' && a.data >= today() ? `<div class="acts" style="width:100%;justify-content:flex-end">${a.pix ? `<button class="btn sm" onclick="telaPix(ui.meus['${a.id}'])">💠 ${a.sinal.status === 'pendente' ? 'Pagar sinal' : 'Ver Pix'}</button>` : ''}<button class="btn ghost sm" onclick="cancelarCli('${a.id}')">Cancelar</button></div>` : ''}</div>`;
   shell('Meus horários', `<button class="btn" onclick="go('agendar')">+ Agendar</button>`, `
   <div class="card"><h3>Próximos</h3>${futuros.length ? `<div class="list">${futuros.map(linha).join('')}</div>` : '<div class="empty">Nenhum horário marcado.</div>'}</div>
   ${hist.length ? `<div class="card" style="margin-top:12px"><h3>Histórico</h3><div class="list">${hist.map(linha).join('')}</div></div>` : ''}`);
 }
-async function cancelarCli(id) {
-  if (!confirm('Cancelar este horário?')) return;
-  try { await api('POST', `/api/meus/${id}/cancelar`); toast('Horário cancelado'); vMeus(); } catch (e) { toast(e.message); }
+function cancelarCli(id) {
+  const a = ui.meus && ui.meus[id]; if (!a) return;
+  const noDia = a.data <= today();
+  const pago = a.sinal && ['pago', 'informado'].includes(a.sinal.status);
+  const aviso = !a.sinal ? '' : !pago
+    ? `<p class="small">O sinal deste horário ainda não foi pago, então não há valor a devolver.</p>`
+    : noDia
+      ? `<div class="sinal-aviso alerta"><b>⚠️ Cancelamento no dia do horário: o sinal de ${brl(a.sinal.valor)} não será devolvido.</b><br>Se quiser remarcar, faça um novo agendamento e pague o sinal novamente.</div>`
+      : `<div class="sinal-aviso"><b>✅ Você está cancelando com antecedência:</b> o sinal de ${brl(a.sinal.valor)} será devolvido por ${esc(PUB.config.negocio)}.</div>`;
+  openModal('Cancelar horário', `
+  <form>
+    <p><b>${esc(a.servicoNome)}</b><br>${DIAS[new Date(a.data + 'T12:00').getDay()]}, ${fmtData(a.data)} às ${a.hora}</p>
+    ${aviso}
+    ${a.sinal ? `<p class="mut small" style="margin-top:8px">${POLITICA_SINAL}</p>` : ''}
+    <div class="err" id="mErr"></div>
+    <div class="modal-foot"><button type="button" class="btn ghost" onclick="closeModal()">Voltar</button><button class="btn bad">Cancelar horário</button></div>
+  </form>`, async () => {
+    try {
+      const r = await api('POST', `/api/meus/${id}/cancelar`);
+      closeModal();
+      if (r.reembolso === 'retido') { toast('Horário cancelado. O sinal não é devolvido no cancelamento do dia.', 5000); ui.book = { servicoId: a.servicoId, profId: a.profId }; go('agendar'); }
+      else { toast(r.reembolso === 'devolver' ? 'Horário cancelado. O estabelecimento foi avisado para devolver seu sinal.' : 'Horário cancelado', 5000); vMeus(); }
+    } catch (e) { $('#mErr').textContent = e.message; }
+    return false;
+  });
+}
+// Tela do Pix do sinal: QR Code, copia e cola, chave e botão "Já paguei".
+function qrSvg(texto) {
+  try { const q = qrcode(0, 'M'); q.addData(texto); q.make(); return q.createSvgTag({ cellSize: 5, margin: 2, scalable: true }); } catch { return ''; }
+}
+function telaPix(a, novo) {
+  const p = a.pix; if (!p) return;
+  const tipo = { cpf: 'CPF', cnpj: 'CNPJ', celular: 'Celular', email: 'E-mail', aleatoria: 'Chave aleatória' }[p.tipo] || 'Chave';
+  openModal(novo ? '✨ Horário reservado! Falta o sinal' : '💠 Pagar sinal', `
+  <div class="pix-box">
+    <p class="small">${esc(a.servicoNome)} · ${fmtData(a.data)} às ${a.hora}</p>
+    <div class="pix-valor">${brl(a.sinal.valor)}<small>sinal de ${a.sinal.pct}% · restante ${brl(a.valor - a.sinal.valor)} no atendimento</small></div>
+    <div class="pix-qr">${qrSvg(p.codigo)}</div>
+    <p class="mut small">Abra o app do seu banco → Pix → <b>Ler QR Code</b> ou <b>Pix copia e cola</b>.</p>
+    <div class="pix-code" id="pxCod">${esc(p.codigo)}</div>
+    <button type="button" class="btn block" onclick="copiarTexto(${esc(JSON.stringify(p.codigo))},'Código Pix copiado')">📋 Copiar código Pix</button>
+    <div class="pix-chave"><span class="mut small">${tipo}</span><b>${esc(p.chave)}</b><button type="button" class="btn ghost sm" onclick="copiarTexto(${esc(JSON.stringify(p.chave))},'Chave copiada')">Copiar chave</button></div>
+    <p class="mut small">Recebedor: <b>${esc(p.nome)}</b></p>
+    ${a.sinal.status === 'pendente' ? `<button type="button" class="btn ok block" style="margin-top:12px" onclick="jaPagueiSinal('${a.id}')">✅ Já paguei — enviar comprovante</button>` : `<p class="small" style="margin-top:12px">🧾 Você já informou o pagamento. ${esc(PUB.config.negocio)} vai confirmar.</p>`}
+    <p class="mut small" style="margin-top:10px">${POLITICA_SINAL}</p>
+  </div>`);
+  ui.pixAtual = a;
+}
+function copiarTexto(t, msg) {
+  (navigator.clipboard?.writeText(t) || Promise.reject()).then(() => toast(msg), () => {
+    const i = document.createElement('textarea'); i.value = t; document.body.appendChild(i); i.select(); document.execCommand('copy'); i.remove(); toast(msg);
+  });
+}
+async function jaPagueiSinal(id) {
+  const a = ui.pixAtual && ui.pixAtual.id === id ? ui.pixAtual : ui.meus?.[id];
+  const w = window.open('', '_blank');
+  try {
+    const r = await api('POST', `/api/meus/${id}/sinal`);
+    const msg = `Olá! Sou ${me.nome}. Paguei o sinal de ${brl(a.sinal.valor)} do meu horário: ${a.servicoNome}, ${fmtData(a.data)} às ${a.hora}. Segue o comprovante 👇`;
+    if (r.whats && w) w.location = `https://wa.me/${r.whats}?text=${encodeURIComponent(msg)}`; else if (w) w.close();
+    closeModal(); toast(r.whats ? 'Anexe o comprovante na conversa do WhatsApp 📎' : 'Pagamento informado!', 5000);
+    if (view === 'meus') vMeus();
+  } catch (e) { if (w) w.close(); toast(e.message); }
 }
 function vPerfil() {
   shell('Perfil', '', `

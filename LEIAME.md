@@ -43,6 +43,18 @@ Na Central você:
 - Conferiu o comprovante? Central → **Ativar plano / Renovar** (o período já vem marcado: 30 ou 365 dias).
 - Os códigos Pix ficam em `public/assinar.js` (gerados a partir da sua chave, com o valor de cada plano).
 
+## Sinal no Pix ao agendar (ex.: 30%)
+- App do dono → **Ajustes → 💠 Pix e sinal**: tipo e chave Pix, nome de quem recebe, cidade e o **% padrão do sinal** (vem 30%).
+- Em **Serviços**, cada serviço pode ter o próprio % (vazio = padrão, 0 = sem sinal).
+- O cliente vê o valor do sinal e a regra de cancelamento antes de confirmar. Depois de agendar, aparece o **QR Code Pix**, o **copia e cola** (já com o valor) e a sua chave. O botão **Já paguei** abre o seu WhatsApp para ele mandar o comprovante e avisa você.
+- Na Agenda e no Dashboard (**⚡ Precisa da sua atenção**): **✓ Sinal recebido** lança a entrada no financeiro. Ao concluir o atendimento, o app já sugere cobrar só o restante.
+- Regra de cancelamento (mostrada ao cliente): cancelou **até o dia anterior** → o sinal é devolvido (você recebe o aviso "Devolver sinal" e marca **Já devolvi**, que lança a saída). Cancelou **no dia** → o sinal **não** é devolvido; para remarcar, ele faz um novo agendamento e paga o sinal de novo.
+- Você recebe notificação quando o cliente agenda, informa o Pix e cancela (dizendo se precisa devolver).
+
+## Cliente esqueceu a senha
+- Na tela de entrar, o cliente toca em **Esqueci minha senha** e informa o telefone.
+- Você recebe a notificação 🔑 e o pedido aparece no Dashboard e em Clientes. Toque em **Enviar nova**: o app cria uma senha nova e abre o WhatsApp do cliente com a mensagem pronta. A senha antiga deixa de valer.
+
 ## Tutorial (primeiro acesso)
 - No **primeiro acesso do dono** abre um tour guiado que destaca cada parte do app (menu, painel, agendar, agenda, vendas, financeiro).
 - No Dashboard fica a lista **🚀 Primeiros passos**: dados da empresa, horário, serviços, criar usuário de funcionário, marcar horário, fazer uma venda, ativar notificações e enviar o link. Cada item tem **Me mostra**, que leva até a tela certa e guia toque a toque.
@@ -107,7 +119,7 @@ Sem `DATABASE_URL`, os dados ficam na pasta `data/`. Defina `DATA_DIR` para muda
 > Se você já tinha configurado uma empresa na versão anterior, ela é migrada automaticamente e aparece na Central (sem vencimento).
 
 ## Funções
-- **Cliente:** cadastro com telefone e senha, agendamento só em horários realmente livres (o servidor confere e bloqueia horário duplicado), meus horários, cancelar, perfil. Limite de 5 horários futuros por cliente.
+- **Cliente:** cadastro com telefone e senha, esqueci minha senha, sinal no Pix, agendamento só em horários realmente livres (o servidor confere e bloqueia horário duplicado), meus horários, cancelar, perfil. Limite de 5 horários futuros por cliente.
 - **Dono:** dashboard, agenda (com marca 📱 nos agendamentos feitos pelo app e destaque para os novos), concluir atendimento lançando no financeiro, vendas, compras, estoque, financeiro com CSV, clientes (bloquear acesso), serviços, profissionais, horários e dias de funcionamento, backup.
 - O painel atualiza sozinho a cada 15 segundos e sempre que você volta para o app.
 

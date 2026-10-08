@@ -236,3 +236,22 @@ h4.sec{font-family:var(--disp);font-size:1rem;margin:20px 0 0;padding-top:14px;b
 .passo span{font-size:.8rem;color:var(--mut)}
 .passo.ok b{color:var(--mut);text-decoration:line-through}
 .passo .grow{flex:1;min-width:0}
+
+/* ----- sinal no Pix ----- */
+.sinal-line{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin-top:6px;font-size:.82rem;padding:6px 9px;border-radius:9px;background:color-mix(in srgb,var(--warn) 12%,transparent);color:var(--tx)}
+.sinal-line.pago,.sinal-line.devolvido{background:color-mix(in srgb,var(--ok) 12%,transparent)}
+.sinal-line.devolver{background:color-mix(in srgb,var(--bad) 16%,transparent);font-weight:700}
+.sinal-line.retido,.sinal-line.nao-pago{background:var(--ac2)}
+.sinal-line .acts{display:flex;gap:6px}
+.sinal-aviso{margin-top:10px;padding:10px 12px;border-radius:12px;background:var(--ac2);font-size:.85rem;line-height:1.45}
+.sinal-aviso.alerta{background:color-mix(in srgb,var(--bad) 16%,transparent)}
+.item.meu{flex-wrap:wrap}
+.pix-box{text-align:center}
+.pix-valor{font-size:2rem;font-weight:800;margin:6px 0 10px;font-family:Fraunces,serif}
+.pix-valor small{display:block;font:500 .78rem Manrope,sans-serif;color:var(--mut)}
+.pix-qr{background:#fff;border-radius:14px;padding:8px;width:220px;max-width:70vw;margin:0 auto 10px}
+.pix-qr svg{width:100%;height:auto;display:block}
+.pix-code{font-family:ui-monospace,monospace;font-size:.72rem;word-break:break-all;background:var(--bg2,rgba(127,127,127,.12));border:1px dashed var(--line);border-radius:10px;padding:10px;margin:10px 0 4px;text-align:left;max-height:90px;overflow:auto;user-select:all}
+.pix-chave{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:6px 10px;margin:12px 0 6px}
+.pix-chave b{word-break:break-all}
+.card.pend{border:1px solid color-mix(in srgb,var(--warn) 45%,transparent)}

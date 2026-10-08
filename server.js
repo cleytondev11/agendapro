@@ -165,6 +165,7 @@ function somaDias(data, dias) { const d = new Date((isoData(data) ? data : hojeS
 const toMin = h => { const [a, b] = String(h).split(':').map(Number); return a * 60 + b; };
 const toHora = m => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 const fmtData = s => String(s).split('-').reverse().join('/');
+const brl = v => 'R$ ' + (Number(v) || 0).toFixed(2).replace('.', ',');
 
 function slugify(s) {
   return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'empresa';
@@ -321,6 +322,59 @@ function empresaPublica(E) {
   return pub;
 }
 
+/* ----- Pix do estabelecimento (sinal dos agendamentos) ----- */
+const TIPOS_CHAVE = ['cpf', 'cnpj', 'celular', 'email', 'aleatoria'];
+const semAcento = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9 .,@+\-]/g, '').trim();
+function chavePixNormal(tipo, chave) {
+  const c = str(chave, 77);
+  if (tipo === 'cpf' || tipo === 'cnpj') return digits(c);
+  if (tipo === 'celular') { const d = digits(c).replace(/^55(?=\d{10,11}$)/, ''); return d.length >= 10 ? '+55' + d : ''; }
+  if (tipo === 'email') return c.toLowerCase();
+  return c.toLowerCase();
+}
+function limparPix(x) {
+  if (!x || typeof x !== 'object') return {};
+  const tipo = TIPOS_CHAVE.includes(x.tipo) ? x.tipo : 'aleatoria';
+  const pct = Math.round(n(x.sinalPadrao));
+  return {
+    ativo: !!x.ativo, tipo, chave: str(x.chave, 77), nome: str(x.nome, 60), cidade: str(x.cidade, 40),
+    sinalPadrao: pct >= 0 && pct <= 100 ? pct : 30
+  };
+}
+// % do sinal do serviço: o do serviço (se definido) ou o padrão. 0 = sem sinal.
+function pctSinal(E, sv) {
+  const px = E.config.pix || {};
+  if (!px.ativo || !chavePixNormal(px.tipo, px.chave)) return 0;
+  const v = sv && sv.sinal !== undefined && sv.sinal !== null && sv.sinal !== '' ? n(sv.sinal) : n(px.sinalPadrao ?? 30);
+  return Math.max(0, Math.min(100, Math.round(v)));
+}
+function crc16(s) {
+  let c = 0xFFFF;
+  for (const b of Buffer.from(s, 'utf8')) { c ^= b << 8; for (let i = 0; i < 8; i++) c = c & 0x8000 ? ((c << 1) ^ 0x1021) & 0xFFFF : (c << 1) & 0xFFFF; }
+  return c.toString(16).toUpperCase().padStart(4, '0');
+}
+const tlv = (id, v) => id + String(v.length).padStart(2, '0') + v;
+// Código Pix "copia e cola" (BR Code) com o valor do sinal.
+function brCode(chave, nome, cidade, valor, txid) {
+  const conta = tlv('00', 'BR.GOV.BCB.PIX') + tlv('01', chave);
+  const corpo = tlv('00', '01') + tlv('26', conta) + tlv('52', '0000') + tlv('53', '986') + tlv('54', Number(valor).toFixed(2)) + tlv('58', 'BR')
+    + tlv('59', (semAcento(nome) || 'Recebedor').slice(0, 25)) + tlv('60', (semAcento(cidade).toUpperCase() || 'BRASIL').slice(0, 15))
+    + tlv('62', tlv('05', (String(txid || '').replace(/[^A-Za-z0-9]/g, '') || '***').slice(0, 25))) + '6304';
+  return corpo + crc16(corpo);
+}
+function whatsEmpresa(E) {
+  const d = digits((E.config.empresa || {}).telefone) || digits(E.meta.donoTel);
+  return d ? (d.length <= 11 ? '55' + d : d) : '';
+}
+function pixDoAgendamento(E, a) {
+  if (!a.sinal || !['pendente', 'informado'].includes(a.sinal.status)) return undefined;
+  const px = E.config.pix || {}, chave = chavePixNormal(px.tipo, px.chave);
+  if (!chave) return undefined;
+  const nome = px.nome || E.config.negocio;
+  return { codigo: brCode(chave, nome, px.cidade || (E.config.empresa || {}).cidade, a.sinal.valor, 'AG' + a.id), chave: px.chave, tipo: px.tipo, nome, whats: whatsEmpresa(E) };
+}
+const comPix = (E, a) => { const pix = pixDoAgendamento(E, a); return pix ? { ...a, pix } : a; };
+
 /* ----- empresa: público ----- */
 route('GET', T + '/public', 'empresa', req => {
   const E = req.E, sit = situacao(E);
@@ -331,7 +385,8 @@ route('GET', T + '/public', 'empresa', req => {
     papel, empresa: empresaPublica(E),
     configured: true, situacao: sit, suporte: SUPORTE, trial: !!E.meta.trial, valor: E.meta.valor || VALOR_PADRAO,
     config: { negocio: E.config.negocio, nicho: E.config.nicho, abre: E.config.abre, fecha: E.config.fecha, intervalo: E.config.intervalo, dias: E.config.dias, tz: E.config.tz },
-    servicos: sit === 'ativa' ? E.servicos.filter(s => s.ativo !== false).map(({ id, nome, preco, duracao }) => ({ id, nome, preco, duracao })) : [],
+    servicos: sit === 'ativa' ? E.servicos.filter(s => s.ativo !== false).map(s => ({ id: s.id, nome: s.nome, preco: s.preco, duracao: s.duracao, sinal: pctSinal(E, s) })) : [],
+    whats: whatsEmpresa(E),
     profissionais: sit === 'ativa' ? E.profissionais.filter(p => p.ativo !== false).map(({ id, nome }) => ({ id, nome })) : [],
     vapidPublic: META.vapid?.publicKey
   };
@@ -386,19 +441,64 @@ route('POST', T + '/agendar', 'any', (req, b) => {
   if (req.user.role === 'cliente' && ativos.length >= 5) fail(400, 'Você já tem 5 horários marcados. Cancele algum para marcar outro.');
   if (!slotsLivres(E, b.data, pr.id, sv.duracao).includes(b.hora)) fail(409, 'Esse horário acabou de ser ocupado. Escolha outro.');
   const a = { id: uid(), status: 'agendado', criadoPor: 'cliente', criadoEm: new Date().toISOString(), clienteId: req.user.id, clienteNome: req.user.nome, tel: req.user.tel, servicoId: sv.id, servicoNome: sv.nome, valor: sv.preco, duracao: sv.duracao, profId: pr.id, data: b.data, hora: b.hora, obs: str(b.obs, 200) };
+  const pct = pctSinal(E, sv), vSinal = Math.round(n(sv.preco) * pct) / 100;
+  if (pct > 0 && vSinal >= 0.01) a.sinal = { pct, valor: vSinal, status: 'pendente' };
   E.agendamentos.push(a);
   changed(E);
-  pushAdmins(E, '📅 Novo agendamento', `${a.clienteNome} — ${a.servicoNome}\n${fmtData(a.data)} às ${a.hora}${E.profissionais.length > 1 ? ' · ' + pr.nome : ''}`, a.profId);
-  return { agendamento: a };
+  pushAdmins(E, '📅 Novo agendamento', `${a.clienteNome} — ${a.servicoNome}\n${fmtData(a.data)} às ${a.hora}${E.profissionais.length > 1 ? ' · ' + pr.nome : ''}${a.sinal ? `\nSinal de ${brl(a.sinal.valor)} aguardando Pix` : ''}`, a.profId);
+  return { agendamento: comPix(E, a) };
 });
-route('GET', T + '/meus', 'any', req => ({ agendamentos: req.E.agendamentos.filter(a => a.clienteId === req.user.id) }));
+route('GET', T + '/meus', 'any', req => ({ agendamentos: req.E.agendamentos.filter(a => a.clienteId === req.user.id).map(a => a.status === 'agendado' ? comPix(req.E, a) : a) }));
+// Cliente avisa que pagou o sinal (o comprovante vai pelo WhatsApp; o dono confirma no app).
+route('POST', T + '/meus/:id/sinal', 'any', (req, b, p) => {
+  const E = req.E, a = E.agendamentos.find(a => a.id === p.id && a.clienteId === req.user.id);
+  if (!a || a.status !== 'agendado' || !a.sinal) fail(404, 'Agendamento não encontrado.');
+  if (a.sinal.status === 'pendente') {
+    a.sinal.status = 'informado'; a.sinal.informadoEm = new Date().toISOString();
+    changed(E);
+    pushAdmins(E, '💠 Sinal pago (confira)', `${a.clienteNome} informou o Pix de ${brl(a.sinal.valor)}\n${a.servicoNome} · ${fmtData(a.data)} às ${a.hora}`, a.profId);
+  }
+  return { ok: true, whats: whatsEmpresa(E) };
+});
+// Regra: cancelou até o dia anterior → sinal devolvido. No dia do horário → sinal não é devolvido (precisa reagendar e pagar de novo).
 route('POST', T + '/meus/:id/cancelar', 'any', (req, b, p) => {
   const E = req.E, a = E.agendamentos.find(a => a.id === p.id && a.clienteId === req.user.id);
   if (!a || a.status !== 'agendado') fail(404, 'Agendamento não encontrado.');
+  const hoje = agora(E.config.tz).data;
+  if (a.data < hoje) fail(400, 'Esse horário já passou.');
+  const antecedencia = hoje < a.data;
   a.status = 'cancelado'; a.canceladoPor = 'cliente';
+  a.cancelamento = { em: new Date().toISOString(), antecedencia };
+  let extra = '', reembolso = 'sem-sinal';
+  if (a.sinal) {
+    if (a.sinal.status === 'pendente') { a.sinal.status = 'nao-pago'; reembolso = 'nao-pago'; }
+    else if (['informado', 'pago'].includes(a.sinal.status)) {
+      a.sinal.status = antecedencia ? 'devolver' : 'retido';
+      reembolso = antecedencia ? 'devolver' : 'retido';
+      extra = antecedencia ? `\n↩️ Devolver o sinal de ${brl(a.sinal.valor)} (cancelou com antecedência)` : `\n🔒 Sinal de ${brl(a.sinal.valor)} não será devolvido (cancelou no dia)`;
+    }
+  }
   changed(E);
-  pushAdmins(E, '❌ Agendamento cancelado', `${a.clienteNome} cancelou ${a.servicoNome}\n${fmtData(a.data)} às ${a.hora}`, a.profId);
-  return { ok: true };
+  pushAdmins(E, '❌ Cliente cancelou', `${a.clienteNome} cancelou ${a.servicoNome}\n${fmtData(a.data)} às ${a.hora}${extra}`, a.profId);
+  return { ok: true, reembolso, valor: a.sinal?.valor || 0 };
+});
+// Esqueci minha senha: avisa o estabelecimento, que cria uma nova senha e envia no WhatsApp do cliente.
+const pedidosSenha = new Map();
+route('POST', T + '/esqueci', 'empresa', (req, b) => {
+  const E = req.E, tel = digits(b.tel);
+  if (tel.length < 10) fail(400, 'Informe o telefone com DDD que você usou no cadastro.');
+  const k = req.ip + '|' + E.meta.slug, t = pedidosSenha.get(k) || [];
+  const recentes = t.filter(x => Date.now() - x < 60 * 60e3);
+  if (recentes.length >= 5) fail(429, 'Muitos pedidos. Tente de novo mais tarde ou chame o estabelecimento no WhatsApp.');
+  recentes.push(Date.now()); pedidosSenha.set(k, recentes);
+  const u = E.users.find(u => u.role === 'cliente' && (u.login === tel || digits(u.tel) === tel));
+  if (u && !u.bloqueado) {
+    const novo = !u.pedidoSenha;
+    u.pedidoSenha = new Date().toISOString();
+    changed(E);
+    if (novo || recentes.length === 1) pushAdmins(E, '🔑 Cliente esqueceu a senha', `${u.nome} (${u.tel || tel}) pediu uma nova senha.\nAbra Clientes para gerar e enviar no WhatsApp.`);
+  }
+  return { ok: true, encontrado: !!u, whats: whatsEmpresa(E) };
 });
 
 /* ----- empresa: dono ----- */
@@ -446,7 +546,7 @@ route('POST', T + '/sync', 'staff', (req, b) => {
   if (req.user.role === 'func') return syncFuncionario(E, req.user, Array.isArray(b.changes) ? b.changes : []);
   for (const ch of Array.isArray(b.changes) ? b.changes : []) {
     if (ch.col === 'config') {
-      if (ch.doc && typeof ch.doc === 'object') { const { nicho, ...resto } = ch.doc; if ('empresa' in resto) resto.empresa = limparEmpresa(resto.empresa); E.config = { ...E.config, ...resto }; } // nicho só pela Central
+      if (ch.doc && typeof ch.doc === 'object') { const { nicho, ...resto } = ch.doc; if ('empresa' in resto) resto.empresa = limparEmpresa(resto.empresa); if ('pix' in resto) resto.pix = limparPix(resto.pix); E.config = { ...E.config, ...resto }; } // nicho só pela Central
       continue;
     }
     if (!COLS.includes(ch.col)) continue;
@@ -462,9 +562,13 @@ route('POST', T + '/sync', 'staff', (req, b) => {
       const { novaSenha, hasSenha, senha, ...clean } = doc;
       const ex = arr.find(u => u.id === doc.id);
       if (ex) {
-        const keep = { senha: ex.senha, role: ex.role, ...(ex.role === 'admin' ? { login: ex.login, bloqueado: false } : {}), ...(ex.role === 'func' ? { login: ex.login, profId: ex.profId } : {}) };
+        const keep = { senha: ex.senha, role: ex.role, pedidoSenha: ex.pedidoSenha, ...(ex.role === 'admin' ? { login: ex.login, bloqueado: false } : {}), ...(ex.role === 'func' ? { login: ex.login, profId: ex.profId } : {}) };
         Object.assign(ex, clean, keep);
-        if (novaSenha && ex.role === 'cliente') ex.senha = hashPw(novaSenha);
+        if (!ex.pedidoSenha) delete ex.pedidoSenha;
+        if (novaSenha && ex.role === 'cliente') {
+          ex.senha = hashPw(novaSenha); delete ex.pedidoSenha;
+          for (const [k, s] of Object.entries(E.sessions)) if (s.uid === ex.id) delete E.sessions[k];
+        }
       } else arr.push({ ...clean, role: 'cliente', senha: novaSenha ? hashPw(novaSenha) : '' });
       continue;
     }
