@@ -7,8 +7,9 @@ Os clientes dele agendam por esse link, de casa, e o horário aparece na hora no
 
 | Endereço | Quem usa |
 |---|---|
+| `/` | **Site de vendas** (botões de WhatsApp para (61) 99252-2517) |
 | `/central` | **Só você.** Cria, renova, bloqueia e exclui assinantes |
-| `/` | Assinante entra com usuário e senha e cai no painel dele |
+| `/entrar` | Assinante entra com usuário e senha e cai no painel dele |
 | `/nome-do-negocio` | Link do assinante: painel dele e agendamento dos clientes dele |
 
 ## Central de Acessos (/central)
@@ -87,3 +88,4 @@ Sem `DATABASE_URL`, os dados ficam na pasta `data/`. Defina `DATA_DIR` para muda
 - `public/` — o app (PWA): `index.html`, `app.js`, `style.css`, `sw.js`, ícones
 - `public/central.html` + `central.js` — a Central de Acessos
 - `public/nichos.js` — serviços e produtos padrão de cada nicho
+- `public/site.html` — site de vendas. Para mostrar o preço, edite `preco: ''` no fim do arquivo (hoje: `preco: '49,90'`)

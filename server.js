@@ -18,7 +18,7 @@ const SUPORTE = String(process.env.SUPORTE_WHATSAPP || '').replace(/\D/g, '');
 const TZ_PADRAO = 'America/Sao_Paulo';
 const PUBLIC = path.join(__dirname, 'public');
 const COLS = ['users', 'profissionais', 'servicos', 'produtos', 'agendamentos', 'compras', 'vendas', 'lancamentos'];
-const RESERVADOS = new Set(['api', 'central', 'm', 'icons', 'assets', 'static', 'admin', 'login', 'sw.js', 'manifest.json']);
+const RESERVADOS = new Set(['api', 'central', 'entrar', 'site', 'm', 'icons', 'assets', 'static', 'admin', 'login', 'sw.js', 'manifest.json']);
 
 /* ================= armazenamento ================= */
 // meta: { vapid, sessions (da Central) } · empresas: { [slug]: dados da empresa }
@@ -555,9 +555,11 @@ function manifestEmpresa(res, slug) {
 }
 function serveStatic(req, res, pathname) {
   const seg = decodeURIComponent(pathname).split('/').filter(Boolean);
-  if (seg[0] === 'central' && seg.length === 1) pathname = '/central.html';
+  if (seg.length === 0) pathname = '/site.html';                       // site de vendas
+  else if (seg[0] === 'entrar' && seg.length === 1) return paginaEmpresa(res, null); // login do assinante
+  else if (seg[0] === 'central' && seg.length === 1) pathname = '/central.html';
   else if (seg[0] === 'm' && seg.length === 2 && seg[1].endsWith('.webmanifest')) return manifestEmpresa(res, seg[1].replace('.webmanifest', ''));
-  else if (seg.length === 0 || (seg.length === 1 && !seg[0].includes('.'))) return paginaEmpresa(res, seg[0]);
+  else if (seg.length === 1 && !seg[0].includes('.')) return paginaEmpresa(res, seg[0]);
   const file = path.normalize(path.join(PUBLIC, decodeURIComponent(pathname)));
   if (!file.startsWith(PUBLIC + path.sep) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) { res.writeHead(404, { 'Content-Type': 'text/plain' }); return res.end('Não encontrado'); }
   const ext = path.extname(file);
