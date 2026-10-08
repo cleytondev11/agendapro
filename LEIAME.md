@@ -43,6 +43,13 @@ Na Central você:
 - Conferiu o comprovante? Central → **Ativar plano / Renovar** (o período já vem marcado: 30 ou 365 dias).
 - Os códigos Pix ficam em `public/assinar.js` (gerados a partir da sua chave, com o valor de cada plano).
 
+## Tutorial (primeiro acesso)
+- No **primeiro acesso do dono** abre um tour guiado que destaca cada parte do app (menu, painel, agendar, agenda, vendas, financeiro).
+- No Dashboard fica a lista **🚀 Primeiros passos**: dados da empresa, horário, serviços, criar usuário de funcionário, marcar horário, fazer uma venda, ativar notificações e enviar o link. Cada item tem **Me mostra**, que leva até a tela certa e guia toque a toque.
+- Os itens são marcados sozinhos quando a pessoa faz a tarefa. O progresso fica salvo na conta (vale em qualquer aparelho).
+- Funcionários também ganham um tour curto no primeiro acesso.
+- Rever depois: **Ajustes → 🎓 Tutorial** (dono) ou **Perfil → Ver tutorial** (funcionário).
+
 ## Dados da empresa e logomarca
 - App do dono → **Ajustes → 🏢 Dados da empresa**: logomarca, nome, razão social, CNPJ (aceita o novo CNPJ com letras), CPF, telefone, e-mail, Instagram e endereço (o CEP preenche rua, bairro e cidade sozinho).
 - A logo aparece no menu do app, na tela de login e agendamento dos clientes, na Central e vira o ícone do app quando o cliente instala.

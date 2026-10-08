@@ -203,3 +203,36 @@ img,canvas{max-width:100%}
 h4.sec{font-family:var(--disp);font-size:1rem;margin:20px 0 0;padding-top:14px;border-top:1px solid var(--line)}
 .card.local{margin:12px 0 4px;font-size:.92rem}
 @media (max-width:860px){.empresa-card .btn{width:100%}}
+
+/* ---------- tour guiado ---------- */
+#tour{position:fixed;inset:0;z-index:80;pointer-events:none}
+#tour.centro{background:rgba(6,4,10,.6);pointer-events:auto}
+.tour-hole{position:fixed;border-radius:14px;box-shadow:0 0 0 9999px rgba(6,4,10,.62),0 0 0 3px var(--ac);transition:left .3s,top .3s,width .3s,height .3s;pointer-events:none;animation:tourPulse 1.8s ease-in-out infinite}
+@keyframes tourPulse{50%{box-shadow:0 0 0 9999px rgba(6,4,10,.62),0 0 0 6px color-mix(in srgb,var(--ac) 55%,transparent)}}
+.tour-card{position:fixed;pointer-events:auto;background:var(--bg2);border:1px solid var(--ac);border-radius:18px;padding:16px;box-shadow:0 30px 70px -20px #000;transition:left .3s,top .3s;animation:tourIn .35s cubic-bezier(.2,.9,.3,1.2)}
+@keyframes tourIn{from{opacity:0;transform:translateY(10px)}}
+#tour.centro .tour-card{animation:none}
+.tour-card h4{font-family:var(--disp);font-size:1.15rem;margin:4px 0 6px}
+.tour-card p{font-size:.92rem;line-height:1.5;color:#d9d2e3}
+.tour-top{display:flex;justify-content:space-between;align-items:center}
+.tour-n{font-size:.72rem;font-weight:800;color:var(--ac);text-transform:uppercase;letter-spacing:.08em}
+.tour-x{background:none;border:0;color:var(--mut);cursor:pointer;font-size:1rem;padding:2px 6px}
+.tour-dica{margin-top:10px;font-size:.85rem;font-weight:700;color:var(--ac)}
+.tour-bar{height:4px;background:var(--line);border-radius:4px;margin:14px 0 12px;overflow:hidden}
+.tour-bar i{display:block;height:100%;background:var(--ac);border-radius:4px;transition:width .3s}
+.tour-acts{display:flex;justify-content:space-between;gap:8px}
+@media (prefers-reduced-motion:reduce){.tour-hole{animation:none}}
+
+/* ---------- primeiros passos ---------- */
+.passos{margin-bottom:12px;border-color:color-mix(in srgb,var(--ac) 45%,var(--line))}
+.passos-h{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.passos-bar{height:8px;background:var(--bg);border-radius:8px;margin:12px 0 6px;overflow:hidden}
+.passos-bar i{display:block;height:100%;background:var(--ok);border-radius:8px;transition:width .5s}
+.passos-l{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:4px 16px}
+.passo{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line);min-width:0}
+.passo .pi{width:34px;height:34px;flex:none;border-radius:10px;background:var(--bg);display:grid;place-items:center;font-size:1rem}
+.passo.ok .pi{background:color-mix(in srgb,var(--ok) 22%,transparent);color:var(--ok);font-weight:800}
+.passo b{display:block;font-size:.92rem}
+.passo span{font-size:.8rem;color:var(--mut)}
+.passo.ok b{color:var(--mut);text-decoration:line-through}
+.passo .grow{flex:1;min-width:0}

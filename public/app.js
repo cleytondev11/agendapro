@@ -153,9 +153,11 @@ async function boot() {
   if (isFunc()) {
     VER = -1; await pull(true); applyTheme(); startPolling(); garantirPush();
     go(FUNC_VIEWS.includes(view) ? view : 'agenda');
+    window.Tour && Tour.aoEntrar();
   } else if (me.role === 'admin') {
     VER = -1; await pull(true); applyTheme(); startPolling(); garantirPush();
     go(view && !CLI_VIEWS.includes(view) ? view : 'dashboard');
+    window.Tour && Tour.aoEntrar();
   } else {
     clearInterval(pollT);
     S.servicos = PUB.servicos; S.profissionais = PUB.profissionais;
@@ -381,6 +383,7 @@ function vDashboard() {
   const topMax = top[0]?.[1] || 1;
 
   shell('Dashboard', `<button class="btn ghost" onclick="formMetas()">🎯 Metas</button><button class="btn" onclick="novoAgendamento()">+ Agendamento</button>`, `
+  ${window.Tour ? Tour.blocoPassos() : ''}
   ${blocoMetas()}
   <div class="grid kpis">
     <div class="card kpi"><div class="l">Faturamento hoje</div><div class="v">${brl(entHoje)}</div><div class="s">${agHoje.length} atendimento(s) hoje</div></div>
@@ -831,6 +834,7 @@ function formServico(id) {
   </form>`, f => {
     const d = { nome: f.nome.trim(), preco: num(f.preco), duracao: parseInt(f.dur) || 30, ativo: !!f.ativo };
     if (s) Object.assign(s, d); else S.servicos.push({ id: uid(), ...d });
+    window.Tour && Tour.marcar('servicos');
     save(); vServicos();
   });
 }
@@ -858,7 +862,7 @@ function vConfig() {
       <div class="card"><h3>Link de agendamento para clientes</h3>
         <p class="mut small">Envie este link. O cliente cria a conta com o telefone, agenda de casa e o horário aparece aqui na hora.</p>
         <div class="share"><input id="lnk" value="${esc(link)}" readonly><button class="btn sm" onclick="copiar()">Copiar</button></div>
-        <div class="acts" style="margin-top:10px"><a class="btn ghost sm" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(convite)}">💬 Enviar no WhatsApp</a></div>
+        <div class="acts" style="margin-top:10px"><a class="btn ghost sm" target="_blank" rel="noopener" onclick="window.Tour && Tour.marcar('link')" href="https://wa.me/?text=${encodeURIComponent(convite)}">💬 Enviar no WhatsApp</a></div>
       </div>
       <div class="card" style="margin-top:12px"><h3>🔔 Notificações de novos agendamentos</h3>
         <p class="mut small">Aviso no celular quando um cliente agendar ou cancelar, mesmo com o app fechado. Ative em cada aparelho que você usa.</p>
@@ -887,6 +891,10 @@ function vConfig() {
         <div class="acts" style="margin-top:10px"><button class="btn sm" onclick="abrirAssinatura()">💳 ${ASSIN?.trial ? 'Assinar' : 'Renovar'} com Pix</button><button class="btn ghost sm" onclick="abrirAssinatura('anual')">Plano anual −33%</button></div>
         <p class="small" style="margin-top:8px">${PUB.suporte ? `<a style="color:var(--ac)" target="_blank" rel="noopener" href="https://wa.me/${PUB.suporte}">Falar com o suporte</a>` : ''}</p>
       </div>
+      <div class="card" style="margin-top:12px"><h3>🎓 Tutorial</h3>
+        <p class="mut small">Reveja o passo a passo do app quando quiser.</p>
+        <div class="acts" style="margin-top:10px"><button class="btn ghost sm" onclick="Tour.iniciar('boasVindas')">Ver tour de novo</button><button class="btn ghost sm" onclick="Tour.mostrarPassos()">Mostrar primeiros passos</button></div>
+      </div>
       <div class="card" style="margin-top:12px"><h3>Acesso do administrador</h3>
         <button class="btn ghost sm" onclick="formSenhaAdmin()">Trocar usuário / senha</button>
       </div>
@@ -905,6 +913,7 @@ function vConfig() {
     const dias = DIAS.map((_, i) => f['d' + i] ? i : -1).filter(i => i >= 0);
     if (!dias.length) return toast('Escolha ao menos um dia');
     Object.assign(c, { abre: f.abre, fecha: f.fecha, intervalo: Number(f.intervalo), dias });
+    window.Tour && Tour.marcar('horarios');
     save(); applyTheme(); toast('Ajustes salvos'); vConfig();
   };
 }
@@ -1030,6 +1039,7 @@ function formEmpresa() {
 }
 
 function copiar() {
+  window.Tour && Tour.marcar('link');
   const i = $('#lnk'); i.select();
   (navigator.clipboard?.writeText(i.value) || Promise.reject()).then(() => toast('Link copiado'), () => { document.execCommand('copy'); toast('Link copiado'); });
 }
@@ -1310,6 +1320,7 @@ function vPerfilFunc() {
     <p class="mut small">Usuário de acesso: <b style="color:var(--tx)">${esc(me.login)}</b></p>
     <form id="fp"><label>Nova senha</label><input type="password" name="senha" minlength="4" required autocomplete="new-password">
       <button class="btn block">Trocar senha</button></form>
+    <button class="btn ghost block" onclick="Tour.iniciar('funcionario')">🎓 Ver tutorial</button>
     <button class="btn ghost block" onclick="logout()">Sair</button>
   </div>`);
   $('#fp').onsubmit = async e => {
