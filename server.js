@@ -257,7 +257,7 @@ function verificarVencimentos() {
     if (m.vence === amanha && m.avisos.v1 !== m.vence) {
       m.avisos.v1 = m.vence; salvar(E);
       evento('vence', `⏳ ${nome}: vence amanhã`, `${oque} termina em ${fmtData(m.vence)}. Hora de chamar no WhatsApp.`, m.slug);
-      pushAdmins(E, m.trial ? '⏳ Seu teste grátis termina amanhã' : '⏳ Sua assinatura vence amanhã', `Renove para continuar usando o AgendaPro. Valor: R$ ${Number(m.valor || VALOR_PADRAO).toFixed(2).replace('.', ',')}/mês.`);
+      pushAdmins(E, m.trial ? '⏳ Seu teste grátis termina amanhã' : '⏳ Sua assinatura vence amanhã', `Renove para continuar usando o AgendaPro. Valor: R$ ${valorPlano(E).toFixed(2).replace('.', ',')}/mês${ehAjustado(E) ? ' (plano ajustado)' : ''}.`);
     }
     if (hoje > m.vence && m.avisos.v0 !== m.vence) {
       m.avisos.v0 = m.vence; salvar(E);
@@ -375,6 +375,16 @@ function pixDoAgendamento(E, a) {
 }
 const comPix = (E, a) => { const pix = pixDoAgendamento(E, a); return pix ? { ...a, pix } : a; };
 
+/* ----- plano ajustado (valor especial definido na Central) ----- */
+const PIX_ASSIN = { chave: process.env.PIX_CHAVE || '7e158db6-1929-40ae-86d0-7484c64a9c84', nome: process.env.PIX_NOME || 'Cleyton de Souza Santos', cidade: process.env.PIX_CIDADE || 'SAO PAULO' };
+const valorPlano = E => Number(E.meta.valor) > 0 ? Number(E.meta.valor) : VALOR_PADRAO;
+const ehAjustado = E => Number(E.meta.valor) > 0 && Math.abs(Number(E.meta.valor) - VALOR_PADRAO) > 0.004;
+function assinaturaInfo(E) {
+  const v = valorPlano(E), aj = ehAjustado(E);
+  return { vence: E.meta.vence || '', trial: !!E.meta.trial, valor: v, ajustado: aj,
+    pix: aj ? brCode(PIX_ASSIN.chave, PIX_ASSIN.nome, PIX_ASSIN.cidade, v, 'AJ' + E.meta.slug.replace(/[^a-z0-9]/gi, '').slice(0, 20)) : '' };
+}
+
 /* ----- empresa: público ----- */
 route('GET', T + '/public', 'empresa', req => {
   const E = req.E, sit = situacao(E);
@@ -382,8 +392,8 @@ route('GET', T + '/public', 'empresa', req => {
   const ses = E.sessions[String(req.headers.authorization || '').replace(/^Bearer /, '')];
   const papel = ses && ses.exp > Date.now() ? E.users.find(u => u.id === ses.uid)?.role || '' : '';
   return {
-    papel, empresa: empresaPublica(E),
-    configured: true, situacao: sit, suporte: SUPORTE, trial: !!E.meta.trial, valor: E.meta.valor || VALOR_PADRAO,
+    papel, empresa: empresaPublica(E), assinatura: papel === 'admin' ? assinaturaInfo(E) : undefined,
+    configured: true, situacao: sit, suporte: SUPORTE, trial: !!E.meta.trial, valor: valorPlano(E),
     config: { negocio: E.config.negocio, nicho: E.config.nicho, abre: E.config.abre, fecha: E.config.fecha, intervalo: E.config.intervalo, dias: E.config.dias, tz: E.config.tz },
     servicos: sit === 'ativa' ? E.servicos.filter(s => s.ativo !== false).map(s => ({ id: s.id, nome: s.nome, preco: s.preco, duracao: s.duracao, sinal: pctSinal(E, s) })) : [],
     whats: whatsEmpresa(E),
@@ -419,7 +429,7 @@ route('POST', T + '/register', 'empresa', (req, b) => {
 });
 
 route('POST', T + '/logout', 'any', req => { delete req.E.sessions[req.token]; salvar(req.E); return { ok: true }; });
-route('GET', T + '/me', 'any', req => ({ user: pubUser(req.user), assinatura: req.user.role !== 'cliente' ? { vence: req.E.meta.vence || '', trial: !!req.E.meta.trial, valor: req.E.meta.valor || VALOR_PADRAO } : undefined }));
+route('GET', T + '/me', 'any', req => ({ user: pubUser(req.user), assinatura: req.user.role !== 'cliente' ? assinaturaInfo(req.E) : undefined }));
 route('PUT', T + '/me', 'any', (req, b) => {
   if (str(b.nome)) req.user.nome = str(b.nome, 80);
   if (b.senha) { if (String(b.senha).length < 4) fail(400, 'Senha muito curta.'); req.user.senha = hashPw(b.senha); }
@@ -707,7 +717,7 @@ function resumo(E) {
   return {
     slug: E.meta.slug, negocio: E.config.negocio, nicho: E.config.nicho,
     dono: dono?.nome || '', login: dono?.login || '', donoTel: E.meta.donoTel || '',
-    criado: E.meta.criado, vence: E.meta.vence || '', valor: E.meta.valor || 0, obs: E.meta.obs || '',
+    criado: E.meta.criado, vence: E.meta.vence || '', valor: valorPlano(E), ajustado: ehAjustado(E), obs: E.meta.obs || '',
     bloqueado: !!E.meta.bloqueado, situacao: situacao(E),
     clientes: E.users.filter(u => u.role === 'cliente').length,
     agMes: E.agendamentos.filter(a => (a.data || '').startsWith(mes) && a.status !== 'cancelado' && a.status !== 'bloqueio').length,
@@ -754,10 +764,11 @@ route('POST', '/api/pagamento-informado', null, (req, b) => {
   const lst = (avisosPg.get(req.ip) || []).filter(t => Date.now() - t < 36e5);
   if (lst.length >= 5) return { ok: true };
   avisosPg.set(req.ip, [...lst, Date.now()]);
-  const anual = b.plano === 'anual', E = EMP[str(b.slug, 60)];
+  const E = EMP[str(b.slug, 60)], anual = b.plano === 'anual', ajust = b.plano === 'ajustado' && E && ehAjustado(E);
   const nome = E ? E.config.negocio : (str(b.negocio, 80) || 'Visitante do site');
-  evento('pago', `💰 Pagamento informado: ${nome}`, `Plano ${anual ? 'anual · R$ 399,90' : 'mensal · R$ 49,90'}. Confira o comprovante no WhatsApp e libere em "${E?.meta.trial ? 'Ativar plano' : 'Renovar'}" (${anual ? '365' : '30'} dias).`, E ? E.meta.slug : '');
-  if (E) { E.meta.pagInformado = { plano: anual ? 'anual' : 'mensal', em: new Date().toISOString() }; salvar(E); }
+  const txt = ajust ? `ajustado · R$ ${valorPlano(E).toFixed(2).replace('.', ',')}` : anual ? 'anual · R$ 399,90' : 'mensal · R$ 49,90';
+  evento('pago', `💰 Pagamento informado: ${nome}`, `Plano ${txt}. Confira o comprovante no WhatsApp e libere em "${E?.meta.trial ? 'Ativar plano' : 'Renovar'}" (${anual ? '365' : '30'} dias).`, E ? E.meta.slug : '');
+  if (E) { E.meta.pagInformado = { plano: ajust ? 'ajustado' : anual ? 'anual' : 'mensal', em: new Date().toISOString() }; salvar(E); }
   return { ok: true };
 });
 
@@ -806,7 +817,11 @@ route('PUT', '/api/central/empresas/:slug', 'central', async (req, b, p) => {
     E.config.nicho = b.nicho;
   }
   if (b.vence !== undefined) E.meta.vence = isoData(b.vence) ? b.vence : '';
-  if (b.valor !== undefined) E.meta.valor = n(b.valor);
+  if (b.valor !== undefined) {
+    const novo = Math.max(0, Math.round(n(b.valor) * 100) / 100), antes = valorPlano(E);
+    E.meta.valor = novo;
+    if (Math.abs(valorPlano(E) - antes) > 0.004) pushAdmins(E, ehAjustado(E) ? '💲 Seu plano foi ajustado' : '💲 Valor do plano atualizado', `Sua mensalidade do AgendaPro agora é R$ ${valorPlano(E).toFixed(2).replace('.', ',')}/mês${ehAjustado(E) ? ' (plano ajustado)' : ''}.`).catch(() => { });
+  }
   if (b.donoTel !== undefined) E.meta.donoTel = str(b.donoTel, 30);
   if (b.obs !== undefined) E.meta.obs = str(b.obs, 300);
   if (b.bloqueado !== undefined) E.meta.bloqueado = !!b.bloqueado;

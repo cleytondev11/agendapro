@@ -168,7 +168,12 @@ async function poll() {
   if (!staff() || syncing || document.hidden) return;
   try { if (await pull(false)) rerender(); } catch { }
 }
-document.addEventListener('visibilitychange', () => { if (document.hidden) return; if (me?.role === 'cliente' && $('#modal').classList.contains('hidden')) checarCancelamentos(); else poll(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  if (me?.role === 'cliente' && $('#modal').classList.contains('hidden')) return checarCancelamentos();
+  poll();
+  if (me?.role === 'admin') api('GET', '/api/me').then(r => { const antes = JSON.stringify(ASSIN); ASSIN = r.assinatura || ASSIN; if (JSON.stringify(ASSIN) !== antes && $('#modal').classList.contains('hidden')) go(view, true); }).catch(() => { });
+});
 window.addEventListener('online', poll);
 let renderPendente = false;
 function rerender() {
@@ -361,7 +366,8 @@ function shell(title, actions, body) {
 
 function abrirAssinatura(plano) {
   if (!window.AgendaProAssinar) return toast('Não foi possível abrir o pagamento. Recarregue a página.');
-  AgendaProAssinar.abrir({ plano, negocio: (S.config || PUB?.config || {}).negocio, slug: SLUG, login: me?.login });
+  const as = ASSIN || PUB?.assinatura;
+  AgendaProAssinar.abrir({ plano, negocio: (S.config || PUB?.config || {}).negocio, slug: SLUG, login: me?.login, ajustado: as?.ajustado ? { valor: as.valor, pix: as.pix } : null });
 }
 function avisoVencimento() {
   if (me?.role !== 'admin' || !ASSIN?.vence) return '';
@@ -374,7 +380,7 @@ function avisoVencimento() {
   }
   if (dias > 5) return '';
   const sup = ` <a href="#" style="color:#1a1300;text-decoration:underline" onclick="abrirAssinatura();return false">Renovar agora</a>`;
-  return `<div class="card" style="background:var(--warn);color:#1a1300;border:0;margin-bottom:14px;font-weight:700">⏳ Sua assinatura ${dias <= 0 ? 'vence hoje' : `vence em ${dias} dia(s)`} (${fmtData(ASSIN.vence)}).${sup}</div>`;
+  return `<div class="card" style="background:var(--warn);color:#1a1300;border:0;margin-bottom:14px;font-weight:700">⏳ Sua assinatura ${dias <= 0 ? 'vence hoje' : `vence em ${dias} dia(s)`} (${fmtData(ASSIN.vence)}) · ${ASSIN.ajustado ? 'plano ajustado ' : ''}${brl(ASSIN.valor || 49.9)}/mês.${sup}</div>`;
 }
 
 function go(v, keepScroll) {
@@ -1197,7 +1203,8 @@ function vConfig() {
       </div>
       <div class="card" style="margin-top:12px"><h3>Assinatura</h3>
         <p class="small">${ASSIN?.vence ? `${ASSIN.trial ? 'Teste grátis' : 'Válida'} até <b>${fmtData(ASSIN.vence)}</b>` : 'Ativa'}</p>
-        <div class="acts" style="margin-top:10px"><button class="btn sm" onclick="abrirAssinatura()">💳 ${ASSIN?.trial ? 'Assinar' : 'Renovar'} com Pix</button><button class="btn ghost sm" onclick="abrirAssinatura('anual')">Plano anual −33%</button></div>
+        <p class="small" style="margin-top:4px">${ASSIN?.ajustado ? `✨ <b>Plano ajustado</b>: ${brl(ASSIN.valor)}/mês (valor especial)` : `Plano mensal: ${brl(ASSIN?.valor || 49.9)}/mês`}</p>
+        <div class="acts" style="margin-top:10px"><button class="btn sm" onclick="abrirAssinatura()">💳 ${ASSIN?.trial ? 'Assinar' : 'Renovar'} com Pix</button>${ASSIN?.ajustado ? '' : `<button class="btn ghost sm" onclick="abrirAssinatura('anual')">Plano anual −33%</button>`}</div>
         <p class="small" style="margin-top:8px">${PUB.suporte ? `<a style="color:var(--ac)" target="_blank" rel="noopener" href="https://wa.me/${PUB.suporte}">Falar com o suporte</a>` : ''}</p>
       </div>
       <div class="card" style="margin-top:12px"><h3>📲 Instalar o app</h3>

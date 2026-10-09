@@ -111,12 +111,13 @@ function render() {
       return `<div class="emp">
         <div class="ic" style="background:${e.temLogo ? 'transparent' : `color-mix(in srgb,${n.cor} 25%,transparent)`}">${e.temLogo ? `<img src="/m/${e.slug}.logo" alt="" style="width:100%;height:100%;object-fit:contain;border-radius:10px">` : n.icon || '✨'}</div>
         <div style="min-width:0">
-          <div class="t">${esc(e.negocio)} <span class="pill ${st}">${STATUS_TXT[st]}</span>${e.pagInformado ? ` <span class="pill" style="background:color-mix(in srgb,#25d366 22%,transparent);color:#4ee38a">💰 informou Pix ${e.pagInformado.plano}</span>` : ''}</div>
+          <div class="t">${esc(e.negocio)} <span class="pill ${st}">${STATUS_TXT[st]}</span>${e.ajustado ? ` <span class="pill" style="background:color-mix(in srgb,#ffc35a 22%,transparent);color:#ffc35a">✨ Plano ajustado</span>` : ''}${e.pagInformado ? ` <span class="pill" style="background:color-mix(in srgb,#25d366 22%,transparent);color:#4ee38a">💰 informou Pix ${e.pagInformado.plano}</span>` : ''}</div>
           <div class="d">${n.label || ''} · <a href="${linkEmp(e.slug)}" target="_blank" rel="noopener">/${esc(e.slug)}</a> · usuário <b>${esc(e.login)}</b>${e.dono ? ' · ' + esc(e.dono) : ''}${e.donoTel ? ' · ' + esc(e.donoTel) : ''}${e.email && e.email !== e.login ? ' · ' + esc(e.email) : ''}${e.cnpj ? ' · CNPJ ' + esc(e.cnpj) : ''}${e.origem === 'site' ? ' · <span style="color:#b48cff">via site</span>' : ''}<br>
             ${e.vence ? `vence ${fmtData(e.vence)}${e.situacao === 'ativa' ? ` (${diasAte(e.vence)} dias)` : ''}` : 'sem vencimento'} · ${brl(e.valor)}/mês · ${e.clientes} clientes · ${e.funcionarios ? e.funcionarios + ' funcionário(s) · ' : ''}${e.agMes} agend. no mês · ${e.aparelhosPush ? `🔔 ${e.aparelhosPush} aparelho(s)` : '🔕 sem notificação'}${e.obs ? ' · ' + esc(e.obs) : ''}</div>
         </div>
         <div class="acts">
           <button class="btn ok sm" onclick="renovar('${e.slug}')">${e.trial ? 'Ativar plano' : 'Renovar'}</button>
+          <button class="btn ghost sm" onclick="ajustarValor('${e.slug}')" title="Ajustar valor da mensalidade">💲 Valor</button>
           <button class="btn ghost sm" onclick="formEmpresa('${e.slug}')">Editar</button>
           <button class="btn ghost sm" onclick="mais('${e.slug}')">⋯</button>
         </div>
@@ -157,7 +158,7 @@ function formEmpresa(slug) {
     <div class="row">
       <div><label>Vencimento <span class="mut">(vazio = sem vencimento)</span></label><input type="date" name="vence" id="fVence" value="${venc}">
         <div class="tabs-f" style="margin-top:6px"><button type="button" onclick="$('#fVence').value=addDias(DADOS.hoje,3);$('#fTrial').checked=true">Teste 3 dias</button><button type="button" onclick="$('#fVence').value=addDias(DADOS.hoje,30);$('#fTrial').checked=false">30 dias</button><button type="button" onclick="$('#fVence').value=addDias(DADOS.hoje,365);$('#fTrial').checked=false">1 ano</button></div></div>
-      <div><label>Valor mensal (R$)</label><input name="valor" inputmode="decimal" value="${e ? e.valor : '49,90'}" placeholder="Ex.: 49,90"></div>
+      <div><label>Valor mensal (R$) <span class="mut">(diferente de 49,90 = plano ajustado)</span></label><input name="valor" inputmode="decimal" value="${e ? e.valor : '49,90'}" placeholder="Ex.: 49,90"></div>
     </div>
     <label>E-mail <span class="mut">(opcional)</span></label><input name="email" type="email" value="${esc(e?.email || '')}">
     <label>Observação</label><input name="obs" value="${esc(e?.obs || '')}" placeholder="Ex.: pago via Pix, plano anual…">
@@ -224,7 +225,8 @@ function renovar(slug) {
   <form>
     <p class="mut">${esc(e.negocio)} · ${e.vence ? 'vence ' + fmtData(e.vence) : 'sem vencimento'}</p>
     <label>Adicionar</label>
-    <select name="dias">${[[30, '30 dias (mensal · R$ 49,90)'], [90, '90 dias (trimestral)'], [180, '180 dias (semestral)'], [365, '365 dias (anual · R$ 399,90)']].map(([d, t]) => `<option value="${d}" ${e.pagInformado?.plano === 'anual' ? (d === 365 ? 'selected' : '') : (d === 30 ? 'selected' : '')}>${t}</option>`).join('')}</select>
+    ${e.ajustado ? `<p class="small" style="margin:4px 0 8px;color:#ffc35a">✨ Plano ajustado: <b>${brl(e.valor)}/mês</b></p>` : ''}
+    <select name="dias">${[[30, e.ajustado ? `30 dias (plano ajustado · ${brl(e.valor)})` : '30 dias (mensal · R$ 49,90)'], [90, `90 dias (trimestral${e.ajustado ? ' · ' + brl(e.valor * 3) : ''})`], [180, `180 dias (semestral${e.ajustado ? ' · ' + brl(e.valor * 6) : ''})`], [365, e.ajustado ? `365 dias (anual · ${brl(e.valor * 12)})` : '365 dias (anual · R$ 399,90)']].map(([d, t]) => `<option value="${d}" ${e.pagInformado?.plano === 'anual' ? (d === 365 ? 'selected' : '') : (d === 30 ? 'selected' : '')}>${t}</option>`).join('')}</select>
     ${e.pagInformado ? `<p class="small" style="margin-top:8px;color:#4ee38a">💰 Informou pagamento do plano ${e.pagInformado.plano} em ${new Date(e.pagInformado.em).toLocaleString('pt-BR')}. Confira o comprovante no WhatsApp antes de liberar.</p>` : ''}
     <p class="mut small" style="margin-top:8px">Se ainda estiver em dia, os dias são somados ao vencimento atual. Se estiver vencido ou bloqueado, conta a partir de hoje e o acesso é liberado.</p>
     ${foot('Renovar')}
@@ -240,12 +242,39 @@ function mais(slug) {
   openModal(e.negocio, `
     <div class="list">
       <div class="item"><div class="grow"><div class="t">Abrir painel do assinante</div><div class="d">${esc(linkEmp(slug))}</div></div><a class="btn ghost sm" target="_blank" rel="noopener" href="${linkEmp(slug)}">Abrir</a></div>
+      <div class="item"><div class="grow"><div class="t">Valor da mensalidade</div><div class="d">${e.ajustado ? `✨ Plano ajustado: ${brl(e.valor)}/mês` : `Padrão: ${brl(e.valor)}/mês`}</div></div><button class="btn ghost sm" onclick="ajustarValor('${slug}')">💲 Ajustar</button></div>
       <div class="item"><div class="grow"><div class="t">Redefinir senha</div><div class="d">Gera nova senha e desconecta o dono dos aparelhos</div></div><button class="btn ghost sm" onclick="novaSenha('${slug}')">Redefinir</button></div>
       ${e.vence && tel ? `<div class="item"><div class="grow"><div class="t">Cobrar no WhatsApp</div><div class="d">Mensagem pronta com vencimento e valor</div></div><a class="btn ghost sm" target="_blank" rel="noopener" href="https://wa.me/${tel}?text=${encodeURIComponent(cobranca)}">💬 Cobrar</a></div>` : ''}
       <div class="item"><div class="grow"><div class="t">${e.bloqueado ? 'Desbloquear acesso' : 'Bloquear acesso'}</div><div class="d">${e.bloqueado ? 'Libera o painel e a agenda dos clientes' : 'Suspende o painel e a agenda online (dados ficam guardados)'}</div></div><button class="btn ${e.bloqueado ? 'ok' : 'bad'} sm" onclick="bloquear('${slug}',${!e.bloqueado})">${e.bloqueado ? 'Desbloquear' : 'Bloquear'}</button></div>
       <div class="item"><div class="grow"><div class="t">Baixar backup</div><div class="d">Todos os dados deste assinante (.json)</div></div><button class="btn ghost sm" onclick="backup('${slug}')">Baixar</button></div>
       <div class="item"><div class="grow"><div class="t" style="color:var(--bad)">Excluir assinante</div><div class="d">Apaga tudo de forma permanente</div></div><button class="btn bad sm" onclick="excluir('${slug}')">Excluir</button></div>
     </div>`);
+}
+// Valor especial (desconto) para um assinante: vira "Plano ajustado" no app dele.
+const VALOR_PADRAO = 49.9;
+function ajustarValor(slug) {
+  const e = DADOS.empresas.find(x => x.slug === slug);
+  openModal('💲 Valor da mensalidade', `<form>
+    <p class="mut">${esc(e.negocio)} · hoje: <b>${brl(e.valor)}/mês</b>${e.ajustado ? ' (plano ajustado)' : ' (padrão)'}</p>
+    <label>Novo valor mensal (R$)</label>
+    <input name="valor" id="fValor" inputmode="decimal" required value="${String(e.valor.toFixed(2)).replace('.', ',')}" placeholder="Ex.: 39,90">
+    <div class="tabs-f" style="margin-top:8px">${[29.9, 34.9, 39.9, 44.9].map(v => `<button type="button" onclick="$('#fValor').value='${v.toFixed(2).replace('.', ',')}';prevAjuste()">${brl(v)}</button>`).join('')}<button type="button" onclick="$('#fValor').value='49,90';prevAjuste()">Padrão</button></div>
+    <p class="small" id="fPrev" style="margin-top:10px"></p>
+    <p class="mut small" style="margin-top:6px">Na hora em que salvar, o assinante vê o novo valor em <b>Ajustes → Assinatura</b> e na tela de pagamento (com o Pix já no valor certo) e recebe uma notificação. Vale também para as próximas renovações.</p>
+    <div class="err" id="mErr"></div>
+    ${foot('Salvar valor')}</form>`, async f => {
+    const v = num(f.valor);
+    if (!(v > 0) || v > 9999) { $('#mErr').textContent = 'Informe um valor maior que zero.'; return false; }
+    await api('PUT', '/api/central/empresas/' + slug, { valor: v });
+    toast(Math.abs(v - VALOR_PADRAO) > 0.004 ? `✨ Plano ajustado: ${brl(v)}/mês` : 'Valor padrão restaurado'); carregar();
+  });
+  window.prevAjuste = () => {
+    const v = num($('#fValor').value), el = $('#fPrev'); if (!el) return;
+    if (!(v > 0)) { el.textContent = ''; return; }
+    const d = Math.round((1 - v / VALOR_PADRAO) * 100);
+    el.innerHTML = Math.abs(v - VALOR_PADRAO) < 0.005 ? 'Plano mensal padrão.' : `✨ Vai aparecer como <b>Plano ajustado</b>: ${brl(v)}/mês${d > 0 ? ` (${d}% de desconto)` : ''}.`;
+  };
+  $('#fValor').addEventListener('input', prevAjuste); prevAjuste();
 }
 function novaSenha(slug) {
   const e = DADOS.empresas.find(x => x.slug === slug);

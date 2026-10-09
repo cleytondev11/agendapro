@@ -55,6 +55,11 @@
   @media (max-width:420px){.apx{padding:18px}.apx-p .v{font-size:1.15rem}}
   `;
   let estilo = false, ctx = {}, plano = 'mensal';
+  // Plano ajustado: valor especial definido na Central para este assinante (código Pix vem do servidor).
+  function qrSvgDe(txt) {
+    try { const q = qrcode(0, 'M'); q.addData(txt); q.make(); return q.createSvgTag({ cellSize: 4, margin: 2, scalable: true }); } catch { return ''; }
+  }
+  const planoAtual = () => plano === 'ajustado' && ctx.ajustado ? { nome: 'Ajustado', valor: Number(ctx.ajustado.valor), periodo: '/mês', dias: 30, pix: ctx.ajustado.pix, svg: ctx.ajustado.svg || (ctx.ajustado.svg = qrSvgDe(ctx.ajustado.pix)) } : PLANOS[plano];
 
   function copiar(txt, btn) {
     const ok = () => { const t = btn.textContent; btn.textContent = 'Copiado!'; setTimeout(() => btn.textContent = t, 1600); };
@@ -65,14 +70,14 @@
   function esc_(e) { if (e.key === 'Escape') fechar(); }
 
   function render() {
-    const p = PLANOS[plano], el = document.getElementById('apx');
+    const p = planoAtual(), el = document.getElementById('apx');
     el.innerHTML = `<div class="apx" role="dialog" aria-modal="true" aria-label="Assinar o AgendaPro">
       <div class="apx-h"><h3>Assinar o AgendaPro</h3><button class="apx-x" data-a="fechar" aria-label="Fechar">✕</button></div>
       <p class="apx-sub">${ctx.negocio ? esc(ctx.negocio) + ' · ' : ''}Escolha o plano e pague com Pix.</p>
-      <div class="apx-pl">
+      ${ctx.ajustado ? `<div class="apx-pl" style="grid-template-columns:1fr"><button class="apx-p" data-p="ajustado" aria-pressed="true"><span class="apx-tag">✨ VALOR ESPECIAL</span><b>Plano ajustado</b><div class="v">${brl(Number(ctx.ajustado.valor))}<small>/mês</small></div><div class="s">Valor combinado com você · renova a cada 30 dias</div></button></div>` : `<div class="apx-pl">
         <button class="apx-p" data-p="mensal" aria-pressed="${plano === 'mensal'}"><b>Mensal</b><div class="v">${brl(PLANOS.mensal.valor)}<small>/mês</small></div><div class="s">Renova a cada 30 dias</div></button>
         <button class="apx-p" data-p="anual" aria-pressed="${plano === 'anual'}"><span class="apx-tag">−${desconto}% PROMOÇÃO</span><b>Anual</b><div class="v">${brl(PLANOS.anual.valor)}<small>/ano</small></div><div class="s"><del>${brl(cheio)}</del> · sai por ${brl(PLANOS.anual.valor / 12)}/mês<br>Economize ${brl(economia)}</div></button>
-      </div>
+      </div>`}
       <div class="apx-qr"><div class="q">${p.svg}</div><div class="val">${brl(p.valor)}</div><div class="rec">Recebedor: ${RECEBEDOR}</div></div>
       <div class="apx-lbl">Pix copia e cola</div>
       <div class="apx-cc"><input readonly value="${esc(p.pix)}" aria-label="Código Pix copia e cola"><button class="apx-btn apx-cp" data-a="cc">Copiar</button></div>
@@ -88,7 +93,7 @@
     </div>`;
   }
   function pago() {
-    const p = PLANOS[plano];
+    const p = planoAtual();
     const msg = `Olá! Acabei de pagar o AgendaPro via Pix.\n\n📦 Plano: ${p.nome} — ${brl(p.valor)}${p.periodo}` +
       (ctx.negocio ? `\n🏪 Negócio: ${ctx.negocio}` : '') + (ctx.slug ? `\n🔗 Link: ${location.origin}/${ctx.slug}` : '') +
       (ctx.login ? `\n👤 Usuário: ${ctx.login}` : '') + `\n\nSegue o comprovante 👇`;
@@ -103,7 +108,8 @@
       <button class="apx-btn apx-gh" data-a="fechar">Fechar</button></div>`;
   }
   function abrir(opts = {}) {
-    ctx = opts; plano = opts.plano === 'anual' ? 'anual' : 'mensal';
+    ctx = opts; plano = opts.ajustado && opts.ajustado.pix ? 'ajustado' : opts.plano === 'anual' ? 'anual' : 'mensal';
+    if (plano !== 'ajustado') ctx.ajustado = null;
     if (!estilo) { const s = document.createElement('style'); s.textContent = css; document.head.appendChild(s); estilo = true; }
     fechar();
     const bg = document.createElement('div'); bg.id = 'apx'; bg.className = 'apx-bg';
@@ -112,7 +118,7 @@
       const pl = e.target.closest('[data-p]'); if (pl) { plano = pl.dataset.p; return render(); }
       const a = e.target.closest('[data-a]'); if (!a) return;
       if (a.dataset.a === 'fechar') fechar();
-      else if (a.dataset.a === 'cc') copiar(PLANOS[plano].pix, a);
+      else if (a.dataset.a === 'cc') copiar(planoAtual().pix, a);
       else if (a.dataset.a === 'chave') copiar(CHAVE, a);
       else if (a.dataset.a === 'paguei') pago();
     });
