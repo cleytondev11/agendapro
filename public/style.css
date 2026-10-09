@@ -14,7 +14,7 @@ h1,h2,h3{font-family:var(--disp);font-weight:700;letter-spacing:-.01em}
 .small{font-size:.85rem}
 
 /* ---------- auth ---------- */
-.auth{min-height:100dvh;display:grid;place-items:center;padding:24px 16px;
+.auth{min-height:100dvh;display:grid;place-items:center;padding:calc(24px + env(safe-area-inset-top)) 16px calc(24px + env(safe-area-inset-bottom));
   background:radial-gradient(900px 500px at 10% -10%,var(--ac2),transparent 60%),radial-gradient(700px 400px at 110% 110%,var(--ac2),transparent 60%),var(--bg)}
 .auth-card{width:100%;max-width:400px;background:var(--bg2);border:1px solid var(--line);border-radius:24px;padding:28px 22px}
 .brand{display:flex;align-items:center;gap:12px;margin-bottom:6px}
@@ -117,8 +117,8 @@ th{color:var(--mut);font-size:.75rem;text-transform:uppercase;letter-spacing:.04
 .summary{position:sticky;bottom:80px;margin-top:20px}
 
 /* modal + toast */
-.modal{position:fixed;inset:0;background:rgba(5,4,8,.65);display:flex;align-items:center;justify-content:center;padding:16px;z-index:50;backdrop-filter:blur(3px)}
-.modal-box{background:var(--bg2);border:1px solid var(--line);border-radius:20px;width:100%;max-width:560px;max-height:90dvh;overflow:auto;padding:18px}
+.modal{position:fixed;inset:0;background:rgba(5,4,8,.65);display:flex;align-items:center;justify-content:center;padding:calc(16px + env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom));z-index:50;backdrop-filter:blur(3px)}
+.modal-box{background:var(--bg2);border:1px solid var(--line);border-radius:20px;width:100%;max-width:560px;max-height:calc(100dvh - 32px - env(safe-area-inset-top) - env(safe-area-inset-bottom));overflow:auto;padding:18px}
 .modal-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
 .modal-foot{display:flex;gap:8px;justify-content:flex-end;margin-top:18px}
 .toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%) translateY(20px);background:var(--tx);color:var(--bg);padding:10px 16px;border-radius:12px;font-weight:700;opacity:0;pointer-events:none;transition:.25s;z-index:60}
@@ -255,3 +255,21 @@ h4.sec{font-family:var(--disp);font-size:1rem;margin:20px 0 0;padding-top:14px;b
 .pix-chave{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:6px 10px;margin:12px 0 6px}
 .pix-chave b{word-break:break-all}
 .card.pend{border:1px solid color-mix(in srgb,var(--warn) 45%,transparent)}
+
+/* barra superior no celular: respeita o entalhe/relógio do iPhone e traz o atalho Sair */
+.appbar{display:none}
+.side{padding-top:calc(20px + env(safe-area-inset-top))}
+@media (max-width:860px){
+  .main{padding-top:0}
+  .appbar{display:flex;align-items:center;justify-content:space-between;gap:10px;position:sticky;top:0;z-index:30;
+    margin:0 -16px 14px;padding:calc(10px + env(safe-area-inset-top)) 16px 10px;background:color-mix(in srgb,var(--bg) 88%,transparent);
+    backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+  .ab-brand{display:flex;align-items:center;gap:10px;min-width:0}
+  .ab-brand .logo{width:34px;height:34px;border-radius:10px;font-size:17px;flex:none;background:var(--ac);display:grid;place-items:center}
+  .ab-brand .logo.logo-img{background:transparent}
+  .ab-brand b{font-size:1rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ab-exit{flex:none;display:inline-flex;align-items:center;gap:6px;background:transparent;color:var(--tx);border:1px solid var(--line);border-radius:999px;padding:8px 14px;font:600 .85rem/1 inherit;cursor:pointer;min-height:38px}
+  .ab-exit:active{background:var(--ac2)}
+  .more-menu.open{bottom:calc(70px + env(safe-area-inset-bottom))}
+  .toast{bottom:calc(90px + env(safe-area-inset-bottom))}
+}

@@ -208,6 +208,9 @@ async function boot() {
     garantirPush(); checarCancelamentos();
   }
 }
+function sairRapido() {
+  if (confirm('Sair da sua conta neste aparelho?')) logout();
+}
 async function logout() {
   try { await api('POST', '/api/logout'); } catch { }
   setToken(''); me = null; view = ''; clearInterval(pollT); S = blank(); boot();
@@ -342,6 +345,8 @@ function shell(title, actions, body) {
       <div class="me"><b>${esc(me.nome)}</b><div class="mut">${me.role === 'admin' ? 'Administrador' : isFunc() ? 'Funcionário(a)' : 'Cliente'}</div><button class="btn ghost sm" style="margin-top:8px" onclick="logout()">Sair</button></div>
     </aside>
     <main class="main">
+      <header class="appbar"><div class="ab-brand">${logoBox(n.icon)}<b>${esc(S.config.negocio)}</b></div>
+        <button class="ab-exit" type="button" onclick="sairRapido()" aria-label="Sair da conta"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>Sair</button></header>
       ${avisoVencimento()}
       <div class="top"><h2>${title}</h2><div class="acts">${actions || ''}</div></div>
       ${body}
