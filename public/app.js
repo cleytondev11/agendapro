@@ -31,6 +31,7 @@ const toHora = m => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
 const mesAtual = () => today().slice(0, 7);
 const num = v => parseFloat(String(v).replace(',', '.')) || 0;
 const clone = o => JSON.parse(JSON.stringify(o));
+const conta = a => a.status !== 'cancelado' && a.status !== 'bloqueio'; // conta como atendimento (não é bloqueio nem cancelado)
 
 function toast(msg, ms = 2400) {
   const t = $('#toast'); t.textContent = msg; t.classList.add('show');
@@ -437,7 +438,7 @@ function vDashboard() {
   const entMes = lm.filter(l => l.tipo === 'entrada').reduce((s, l) => s + l.valor, 0);
   const saiMes = lm.filter(l => l.tipo === 'saida').reduce((s, l) => s + l.valor, 0);
   const entHoje = S.lancamentos.filter(l => l.data === hoje && l.tipo === 'entrada').reduce((s, l) => s + l.valor, 0);
-  const agHoje = S.agendamentos.filter(a => a.data === hoje && a.status !== 'cancelado');
+  const agHoje = S.agendamentos.filter(a => a.data === hoje && conta(a));
   const concMes = S.agendamentos.filter(a => a.data.startsWith(mes) && a.status === 'concluido');
   const ticket = concMes.length ? concMes.reduce((s, a) => s + a.valor, 0) / concMes.length : 0;
   const baixo = S.produtos.filter(p => p.qtd <= p.min);
@@ -589,41 +590,197 @@ function drawChart() {
 }
 
 /* ----- agenda ----- */
+/* ----- agenda: lista, dia, semana e mês ----- */
+const MODOS_AG = [['lista', 'Lista'], ['dia', 'Diário'], ['semana', 'Semanal'], ['mes', 'Mensal']];
+const MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+function modoAgenda() {
+  if (!ui.agendaModo) { try { ui.agendaModo = localStorage.getItem('agendapro_modo_agenda'); } catch { } }
+  if (!MODOS_AG.some(m => m[0] === ui.agendaModo)) ui.agendaModo = innerWidth > 860 ? 'semana' : 'lista';
+  return ui.agendaModo;
+}
+function setModoAgenda(m) { ui.agendaModo = m; try { localStorage.setItem('agendapro_modo_agenda', m); } catch { } vAgenda(); }
+const inicioSemana = d => { const dt = new Date(d + 'T12:00'); return addDays(d, -((dt.getDay() + 6) % 7)); };
+const doFiltro = a => isFunc() ? a.profId === me.profId : !ui.agendaProf || a.profId === ui.agendaProf;
+// Categoria visual de cada horário (cor da legenda)
+function catAg(a) {
+  if (a.status === 'bloqueio') return 'bloq';
+  if (a.status === 'cancelado') return 'canc';
+  if (a.status === 'concluido') return 'conc';
+  if (a.sinal && ['pendente', 'informado'].includes(a.sinal.status)) return 'pend';
+  return 'conf';
+}
+const LEGENDA = [['conf', 'Agendado'], ['pend', 'Aguardando sinal'], ['conc', 'Concluído'], ['canc', 'Cancelado'], ['bloq', 'Bloqueio']];
+function navAgenda(dir) {
+  const m = modoAgenda(), d = ui.agendaData;
+  if (m === 'semana') ui.agendaData = addDays(d, 7 * dir);
+  else if (m === 'mes') { const dt = new Date(d + 'T12:00'); dt.setDate(1); dt.setMonth(dt.getMonth() + dir); ui.agendaData = iso(dt); }
+  else ui.agendaData = addDays(d, dir);
+  vAgenda();
+}
+function tituloPeriodo() {
+  const m = modoAgenda(), d = ui.agendaData, dt = new Date(d + 'T12:00');
+  if (m === 'mes') return `${MESES[dt.getMonth()]} de ${dt.getFullYear()}`;
+  if (m === 'semana') {
+    const a = new Date(inicioSemana(d) + 'T12:00'), b = new Date(addDays(inicioSemana(d), 6) + 'T12:00');
+    return a.getMonth() === b.getMonth() ? `${a.getDate()} a ${b.getDate()} de ${MESES[b.getMonth()]} de ${b.getFullYear()}` : `${a.getDate()} de ${MESES[a.getMonth()].slice(0, 3)}. a ${b.getDate()} de ${MESES[b.getMonth()].slice(0, 3)}. de ${b.getFullYear()}`;
+  }
+  return `${DIAS[dt.getDay()].toLowerCase()}., ${dt.getDate()} de ${MESES[dt.getMonth()]} de ${dt.getFullYear()}`;
+}
 function vAgenda() {
-  const d = ui.agendaData;
-  const lista = S.agendamentos.filter(a => a.data === d && (isFunc() ? a.profId === me.profId : !ui.agendaProf || a.profId === ui.agendaProf)).sort((a, b) => a.hora.localeCompare(b.hora));
-  const prev = lista.filter(a => a.status !== 'cancelado').reduce((s, a) => s + a.valor, 0);
-  shell(isFunc() ? 'Minha agenda' : 'Agenda', `<button class="btn" onclick="novoAgendamento()">+ Agendamento</button>`, `
-  <div class="filters">
-    <button class="btn ghost sm" onclick="ui.agendaData=addDays(ui.agendaData,-1);vAgenda()">◀</button>
-    <input type="date" value="${d}" onchange="ui.agendaData=this.value;vAgenda()">
-    <button class="btn ghost sm" onclick="ui.agendaData=addDays(ui.agendaData,1);vAgenda()">▶</button>
-    <button class="btn ghost sm" onclick="ui.agendaData=today();vAgenda()">Hoje</button>
-    ${S.profissionais.length > 1 && !isFunc() ? `<select onchange="ui.agendaProf=this.value;vAgenda()"><option value="">Todos profissionais</option>${opts(profsAtivos(), ui.agendaProf)}</select>` : ''}
+  const m = modoAgenda(), d = ui.agendaData;
+  let periodo;
+  if (m === 'semana') { const ini = inicioSemana(d); periodo = [...Array(7)].map((_, i) => addDays(ini, i)); }
+  else if (m === 'mes') { const p = d.slice(0, 7); periodo = S.agendamentos.map(a => a.data).filter(x => x.startsWith(p)); }
+  else periodo = [d];
+  const set = new Set(periodo);
+  const doPeriodo = S.agendamentos.filter(a => set.has(a.data) && doFiltro(a));
+  const ativos = doPeriodo.filter(conta), prev = ativos.reduce((s, a) => s + (a.valor || 0), 0);
+  const quando = m === 'semana' ? 'na semana' : m === 'mes' ? 'no mês' : 'no dia';
+  shell(isFunc() ? 'Minha agenda' : 'Agenda', `<button class="btn ghost" onclick="formBloqueio()">⛔ Bloquear</button><button class="btn" onclick="novoAgendamento()">+ Agendamento</button>`, `
+  <div class="ag-sub mut small">${ativos.length} agendamento(s) ${quando} · previsto ${brl(prev)}</div>
+  <div class="ag-bar">
+    <div class="ag-modos" role="tablist">${MODOS_AG.map(([k, l]) => `<button role="tab" aria-selected="${m === k}" class="${m === k ? 'on' : ''}" onclick="setModoAgenda('${k}')">${l}</button>`).join('')}</div>
+    ${S.profissionais.length > 1 && !isFunc() ? `<select class="ag-prof" onchange="ui.agendaProf=this.value;vAgenda()"><option value="">Todos profissionais</option>${opts(profsAtivos(), ui.agendaProf)}</select>` : ''}
   </div>
-  <div class="card">
-    <div class="small mut" style="margin-bottom:6px">${DIAS[new Date(d + 'T12:00').getDay()]}, ${fmtData(d)} · ${lista.filter(a => a.status !== 'cancelado').length} agendamento(s) · previsto ${brl(prev)}</div>
-    ${lista.length ? `<div class="list">${lista.map(a => {
-      const extra = [S.profissionais.length > 1 ? esc(byId('profissionais', a.profId)?.nome || '') : '', a.tel ? esc(a.tel) : '', a.pagamento || '', a.obs ? '“' + esc(a.obs) + '”' : '', a.canceladoPor === 'cliente' ? 'cancelado pelo cliente' : a.status === 'cancelado' ? 'cancelado por você' : ''].filter(Boolean).join(' · ');
-      const wa = a.tel ? `https://wa.me/55${a.tel.replace(/\D/g, '').replace(/^55(?=\d{10,11}$)/, '')}?text=${encodeURIComponent(`Olá ${a.clienteNome}! Confirmando seu horário em ${S.config.negocio}: ${fmtData(a.data)} às ${a.hora} (${a.servicoNome}).`)}` : '';
-      return `<div class="ag ${ui.novos.has(a.id) ? 'novo' : ''} ${a.status}">
-        <div class="ag-hora">${a.hora}<small>${a.duracao} min</small></div>
-        <div class="ag-info">
-          <div class="ag-top"><b>${esc(a.clienteNome)}</b>${tagApp(a)}<span class="pill ${a.status}">${a.status}</span></div>
-          <div class="d">${esc(a.servicoNome)} · <b style="color:var(--tx)">${brl(a.valor)}</b></div>
-          ${extra ? `<div class="d">${extra}</div>` : ''}
-          ${linhaSinal(a)}
-          ${a.status === 'agendado' || wa ? `<div class="ag-acts">
-            ${a.status === 'agendado' ? `<button class="btn ok sm" onclick="concluir('${a.id}')">✓ Concluir</button><button class="btn ghost sm" onclick="novoAgendamento('${a.id}')">Editar</button><button class="btn ghost sm" onclick="cancelarAg('${a.id}')">Cancelar</button>` : ''}
-            ${wa ? `<a class="btn ghost sm" target="_blank" rel="noopener" href="${wa}">💬 WhatsApp</a>` : ''}
-          </div>` : ''}
-        </div>
-      </div>`;
-    }).join('')}</div>` : '<div class="empty">Agenda livre neste dia.</div>'}
-  </div>`);
+  <div class="ag-nav">
+    <button class="icon-btn" aria-label="Anterior" onclick="navAgenda(-1)">‹</button>
+    <div class="ag-tit"><b>${tituloPeriodo()}</b><label class="ag-pick">📅<input type="date" value="${d}" onchange="if(this.value){ui.agendaData=this.value;vAgenda()}" aria-label="Escolher data"></label><button class="btn ghost sm" onclick="ui.agendaData=today();vAgenda()">Hoje</button></div>
+    <button class="icon-btn" aria-label="Próximo" onclick="navAgenda(1)">›</button>
+  </div>
+  <div class="ag-leg">${LEGENDA.map(([k, l]) => `<span><i class="c-${k}"></i>${l}</span>`).join('')}</div>
+  ${m === 'lista' ? listaAgenda(d) : m === 'mes' ? mesAgenda(d) : gradeAgenda(m === 'semana' ? periodo : [d])}`);
+  if (m !== 'lista' && m !== 'mes') { const sc = $('.cal-scroll'); const now = $('.cal-now'); if (sc && now && !ui._calScrolled) { sc.scrollTop = Math.max(0, now.offsetTop - 120); } }
+}
+function cardAg(a) {
+  if (a.status === 'bloqueio') return `<div class="ag bloqueio"><div class="ag-hora">${a.hora}<small>${a.duracao} min</small></div><div class="ag-info">
+    <div class="ag-top"><b>⛔ ${esc(a.clienteNome || 'Bloqueado')}</b><span class="pill bloq">bloqueio</span></div>
+    <div class="d">até ${toHora(toMin(a.hora) + a.duracao)}${S.profissionais.length > 1 ? ' · ' + esc(byId('profissionais', a.profId)?.nome || '') : ''}</div>
+    <div class="ag-acts"><button class="btn ghost sm" onclick="removerBloqueio('${a.id}')">Remover bloqueio</button></div></div></div>`;
+  const extra = [S.profissionais.length > 1 ? esc(byId('profissionais', a.profId)?.nome || '') : '', a.tel ? esc(a.tel) : '', a.pagamento || '', a.obs ? '“' + esc(a.obs) + '”' : '', a.canceladoPor === 'cliente' ? 'cancelado pelo cliente' : a.status === 'cancelado' ? 'cancelado por você' : ''].filter(Boolean).join(' · ');
+  const wa = a.tel ? `https://wa.me/55${a.tel.replace(/\D/g, '').replace(/^55(?=\d{10,11}$)/, '')}?text=${encodeURIComponent(`Olá ${a.clienteNome}! Confirmando seu horário em ${S.config.negocio}: ${fmtData(a.data)} às ${a.hora} (${a.servicoNome}).`)}` : '';
+  return `<div class="ag ${ui.novos.has(a.id) ? 'novo' : ''} ${a.status}">
+    <div class="ag-hora">${a.hora}<small>${a.duracao} min</small></div>
+    <div class="ag-info">
+      <div class="ag-top"><b>${esc(a.clienteNome)}</b>${tagApp(a)}<span class="pill ${a.status}">${a.status}</span></div>
+      <div class="d">${esc(a.servicoNome)} · <b style="color:var(--tx)">${brl(a.valor)}</b></div>
+      ${extra ? `<div class="d">${extra}</div>` : ''}
+      ${linhaSinal(a)}
+      ${a.status === 'agendado' || wa ? `<div class="ag-acts">
+        ${a.status === 'agendado' ? `<button class="btn ok sm" onclick="closeModal();concluir('${a.id}')">✓ Concluir</button><button class="btn ghost sm" onclick="closeModal();novoAgendamento('${a.id}')">Editar</button><button class="btn ghost sm" onclick="closeModal();cancelarAg('${a.id}')">Cancelar</button>` : ''}
+        ${wa ? `<a class="btn ghost sm" target="_blank" rel="noopener" href="${wa}">💬 WhatsApp</a>` : ''}
+      </div>` : ''}
+    </div>
+  </div>`;
+}
+function listaAgenda(d) {
+  const lista = S.agendamentos.filter(a => a.data === d && doFiltro(a)).sort((a, b) => a.hora.localeCompare(b.hora));
+  return `<div class="card">${lista.length ? `<div class="list">${lista.map(cardAg).join('')}</div>` : '<div class="empty">Agenda livre neste dia.</div>'}</div>`;
+}
+// Grade de horários (1 dia ou 7 dias), estilo calendário
+const HORA_PX = 64;
+function gradeAgenda(dias) {
+  const c = S.config;
+  const evs = S.agendamentos.filter(a => dias.includes(a.data) && doFiltro(a));
+  let ini = Math.floor(toMin(c.abre) / 60) * 60, fim = Math.ceil(toMin(c.fecha) / 60) * 60;
+  evs.forEach(a => { ini = Math.min(ini, Math.floor(toMin(a.hora) / 60) * 60); fim = Math.max(fim, Math.ceil((toMin(a.hora) + (a.duracao || 30)) / 60) * 60); });
+  if (fim <= ini) fim = ini + 60;
+  const horas = []; for (let h = ini; h < fim; h += 60) horas.push(h);
+  const altura = horas.length * HORA_PX, hoje = today(), agora = new Date(), minAgora = agora.getHours() * 60 + agora.getMinutes();
+  const col = d => {
+    const lista = evs.filter(a => a.data === d).map(a => ({ a, s: toMin(a.hora), e: toMin(a.hora) + (a.duracao || 30) })).sort((x, y) => x.s - y.s || y.e - x.e);
+    // faixas lado a lado quando os horários se sobrepõem
+    const grupos = []; let g = null;
+    lista.forEach(x => { if (!g || x.s >= g.fim) { g = { itens: [], fim: x.e }; grupos.push(g); } g.itens.push(x); g.fim = Math.max(g.fim, x.e); });
+    grupos.forEach(gr => { const lanes = []; gr.itens.forEach(x => { let l = lanes.findIndex(f => f <= x.s); if (l < 0) { l = lanes.length; lanes.push(0); } lanes[l] = x.e; x.l = l; }); gr.itens.forEach(x => x.n = lanes.length); });
+    const fechado = !c.dias.includes(new Date(d + 'T12:00').getDay());
+    return `<div class="cal-col ${d === hoje ? 'hoje' : ''} ${fechado ? 'fechado' : ''}" data-d="${d}" onclick="cliqueGrade(event,'${d}',${ini})">
+      ${lista.map(({ a, s, e, l, n }) => {
+        const top = (s - ini) * HORA_PX / 60, h = Math.max(22, (e - s) * HORA_PX / 60 - 3), cat = catAg(a);
+        return `<button type="button" class="cal-ev c-${cat}" style="top:${top}px;height:${h}px;left:calc(${l * 100 / n}% + 3px);width:calc(${100 / n}% - 6px)" onclick="event.stopPropagation();detalheAg('${a.id}')" title="${esc(a.hora + ' · ' + a.clienteNome + ' · ' + a.servicoNome)}">
+          <b>${a.hora}${h > 34 ? '' : ' ' + esc(a.status === 'bloqueio' ? '⛔' : a.clienteNome.split(' ')[0])}</b>${h > 34 ? `<span>${a.status === 'bloqueio' ? '⛔ ' + esc(a.clienteNome || 'Bloqueado') : esc(a.clienteNome)}</span>` : ''}${h > 56 ? `<small>${esc(a.status === 'bloqueio' ? '' : a.servicoNome)}</small>` : ''}</button>`;
+      }).join('')}
+      ${d === hoje && minAgora >= ini && minAgora <= fim ? `<div class="cal-now" style="top:${(minAgora - ini) * HORA_PX / 60}px"></div>` : ''}
+    </div>`;
+  };
+  const semana = dias.length > 1;
+  return `<div class="cal ${semana ? 'sem' : 'dia'}"><div class="cal-scroll">
+    <div class="cal-grid" style="--n:${dias.length}">
+      <div class="cal-h cal-corner"></div>
+      ${dias.map(d => { const dt = new Date(d + 'T12:00'); return `<button type="button" class="cal-h ${d === hoje ? 'hoje' : ''}" onclick="ui.agendaData='${d}';setModoAgenda('dia')"><small>${DIAS[dt.getDay()].toUpperCase()}</small><b>${dt.getDate()}</b><em>${evs.filter(a => a.data === d && conta(a)).length || ''}</em></button>`; }).join('')}
+      <div class="cal-horas" style="height:${altura}px">${horas.map(h => `<div style="height:${HORA_PX}px"><span>${toHora(h)}</span></div>`).join('')}</div>
+      ${dias.map(d => `<div class="cal-cel" style="height:${altura}px;background-size:100% ${HORA_PX}px">${col(d)}</div>`).join('')}
+    </div></div></div>
+    <p class="mut small" style="margin-top:8px">Toque num espaço vazio para marcar um horário. Toque num horário para ver detalhes${semana ? ' e no dia para abrir o dia' : ''}.</p>`;
+}
+function cliqueGrade(ev, d, ini) {
+  const r = ev.currentTarget.getBoundingClientRect(), y = ev.clientY - r.top;
+  const passo = Number(S.config.intervalo) || 30;
+  const min = ini + Math.floor((y / HORA_PX * 60) / passo) * passo;
+  novoAgendamento(null, { data: d, hora: toHora(min) });
+}
+function mesAgenda(d) {
+  const p = new Date(d.slice(0, 7) + '-01T12:00'), hoje = today();
+  const ini = inicioSemana(iso(p));
+  const cels = [...Array(42)].map((_, i) => addDays(ini, i));
+  const ult = cels.slice(35).every(x => x.slice(0, 7) !== d.slice(0, 7)) ? cels.slice(0, 35) : cels;
+  return `<div class="mes">
+    ${['SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB', 'DOM'].map(x => `<div class="mes-h">${x}</div>`).join('')}
+    ${ult.map(x => {
+      const evs = S.agendamentos.filter(a => a.data === x && doFiltro(a)).sort((a, b) => a.hora.localeCompare(b.hora));
+      const fora = x.slice(0, 7) !== d.slice(0, 7);
+      return `<button type="button" class="mes-c ${fora ? 'fora' : ''} ${x === hoje ? 'hoje' : ''}" onclick="ui.agendaData='${x}';setModoAgenda('dia')">
+        <b>${+x.slice(8)}</b>
+        ${evs.slice(0, 3).map(a => `<span class="mes-ev c-${catAg(a)}">${a.hora} ${esc(a.status === 'bloqueio' ? '⛔' : a.clienteNome.split(' ')[0])}</span>`).join('')}
+        ${evs.length > 3 ? `<span class="mes-mais">+${evs.length - 3} mais</span>` : ''}
+        ${evs.filter(conta).length ? `<i class="mes-dot">${evs.filter(conta).length}</i>` : evs.some(a => a.status === 'bloqueio') ? '<i class="mes-dot bq">⛔</i>' : ''}
+      </button>`;
+    }).join('')}
+  </div>`;
+}
+function detalheAg(id) {
+  const a = byId('agendamentos', id); if (!a) return;
+  const dt = new Date(a.data + 'T12:00');
+  openModal(a.status === 'bloqueio' ? 'Horário bloqueado' : 'Agendamento', `<p class="mut small" style="margin-bottom:6px">${DIAS[dt.getDay()]}, ${fmtData(a.data)}</p><div class="list">${cardAg(a)}</div>`);
+}
+/* ----- bloquear horários (folga, almoço, compromisso) ----- */
+function formBloqueio() {
+  const profs = isFunc() ? S.profissionais.filter(p => p.id === me.profId) : profsAtivos();
+  const c = S.config;
+  openModal('⛔ Bloquear horário', `
+  <form>
+    <p class="mut small">Os horários bloqueados somem da agenda online dos clientes. Use para almoço, folga, curso ou compromisso.</p>
+    ${profs.length > 1 ? `<label>Profissional</label><select name="prof"><option value="">Todos</option>${opts(profs, ui.agendaProf)}</select>` : `<input type="hidden" name="prof" value="${profs[0]?.id || ''}">`}
+    <div class="row"><div><label>De (data)</label><input type="date" name="de" required value="${ui.agendaData}"></div><div><label>Até (data)</label><input type="date" name="ate" required value="${ui.agendaData}"></div></div>
+    <label style="margin-top:12px"><input type="checkbox" name="todo" id="bqTodo" style="width:auto;margin-right:6px">Dia inteiro</label>
+    <div class="row" id="bqHoras"><div><label>Das</label><input type="time" name="hi" value="12:00"></div><div><label>Até</label><input type="time" name="hf" value="13:00"></div></div>
+    <label>Motivo <span class="mut">(só você vê)</span></label><input name="motivo" placeholder="Ex.: Almoço, Folga, Curso" maxlength="60">
+    <div class="err" id="mErr"></div>
+    ${foot('Bloquear')}
+  </form>`, f => {
+    const ids = f.prof ? [f.prof] : profs.map(p => p.id);
+    if (f.ate < f.de) { $('#mErr').textContent = 'A data final é antes da inicial.'; return false; }
+    const hi = f.todo ? c.abre : f.hi, hf = f.todo ? c.fecha : f.hf;
+    if (toMin(hf) <= toMin(hi)) { $('#mErr').textContent = 'O horário final precisa ser depois do inicial.'; return false; }
+    let n = 0, conflito = 0;
+    for (let d = f.de; d <= f.ate && n < 400; d = addDays(d, 1)) {
+      for (const pid of ids) {
+        const ocup = S.agendamentos.some(a => a.data === d && a.profId === pid && conta(a) && toMin(a.hora) < toMin(hf) && toMin(a.hora) + (a.duracao || 30) > toMin(hi));
+        if (ocup) conflito++;
+        S.agendamentos.push({ id: uid(), status: 'bloqueio', criadoPor: 'admin', criadoEm: new Date().toISOString(), clienteId: '', clienteNome: f.motivo.trim() || 'Bloqueado', tel: '', servicoId: '', servicoNome: 'Bloqueio', valor: 0, duracao: toMin(hf) - toMin(hi), profId: pid, data: d, hora: hi, obs: '' });
+        n++;
+      }
+    }
+    save(); toast(`⛔ ${n} bloqueio(s) criado(s)${conflito ? ` · atenção: ${conflito} já tinha(m) cliente marcado` : ''}`, 4500); vAgenda();
+  });
+  const t = () => $('#bqHoras').classList.toggle('hidden', $('#bqTodo').checked);
+  $('#bqTodo').onchange = t;
+}
+function removerBloqueio(id) {
+  if (!confirm('Remover este bloqueio? O horário volta a ficar livre.')) return;
+  S.agendamentos = S.agendamentos.filter(a => a.id !== id); save(); closeModal(); toast('Bloqueio removido'); vAgenda();
 }
 
-function novoAgendamento(id) {
+function novoAgendamento(id, pre) {
   const a = id ? byId('agendamentos', id) : null;
   const clientes = S.users.filter(u => u.role === 'cliente').sort((x, y) => x.nome.localeCompare(y.nome));
   openModal(a ? 'Editar agendamento' : 'Novo agendamento', `
@@ -633,7 +790,7 @@ function novoAgendamento(id) {
     <div class="row" id="avulso"><div><label>Nome</label><input name="nome" value="${esc(a && !a.clienteId ? a.clienteNome : '')}"></div><div><label>Telefone</label><input name="tel" inputmode="tel" value="${esc(a && !a.clienteId ? a.tel : '')}"></div></div>
     <label>Serviço</label><select name="servicoId" id="mSv" required>${opts(servAtivos(), a?.servicoId, x => x.id, x => `${x.nome} — ${brl(x.preco)} (${x.duracao}min)`)}</select>
     <label>Profissional</label><select name="profId" id="mPr">${opts(isFunc() ? S.profissionais.filter(p => p.id === me.profId) : profsAtivos(), a?.profId || (isFunc() ? me.profId : ''))}</select>
-    <div class="row"><div><label>Data</label><input type="date" name="data" id="mDt" required value="${a?.data || ui.agendaData}"></div>
+    <div class="row"><div><label>Data</label><input type="date" name="data" id="mDt" required value="${a?.data || pre?.data || ui.agendaData}"></div>
       <div><label>Horário</label><select name="hora" id="mHr" required></select></div></div>
     <label>Observação</label><input name="obs" value="${esc(a?.obs || '')}">
     <div class="err" id="mErr"></div>
@@ -651,7 +808,9 @@ function novoAgendamento(id) {
     const sv = byId('servicos', $('#mSv').value), pr = $('#mPr').value, dt = $('#mDt').value;
     const livres = sv && dt ? slotsLivres(dt, pr, sv.duracao, a?.id) : [];
     if (a && a.data === dt && !livres.includes(a.hora)) livres.unshift(a.hora);
-    $('#mHr').innerHTML = livres.length ? livres.map(h => `<option ${a?.hora === h ? 'selected' : ''}>${h}</option>`).join('') : '<option value="">Sem horários</option>';
+    const quer = a?.hora || pre?.hora;
+    $('#mHr').innerHTML = livres.length ? livres.map(h => `<option ${quer === h ? 'selected' : ''}>${h}</option>`).join('') : '<option value="">Sem horários</option>';
+    if (pre?.hora && !a && livres.length && !livres.includes(pre.hora)) { const prox = livres.find(h => h >= pre.hora); if (prox) $('#mHr').value = prox; }
   };
   const togAv = () => $('#avulso').classList.toggle('hidden', !!$('#mCli').value);
   ['#mSv', '#mPr', '#mDt'].forEach(s => $(s).onchange = upd); $('#mCli').onchange = togAv;
@@ -1643,7 +1802,7 @@ function vResumo() {
   const mes = mesAtual(), hoje = today();
   const meus = S.agendamentos.filter(a => a.profId === me.profId);
   const conc = meus.filter(a => a.status === 'concluido' && a.data.startsWith(mes));
-  const hojeL = meus.filter(a => a.data === hoje && a.status !== 'cancelado');
+  const hojeL = meus.filter(a => a.data === hoje && conta(a));
   const prox = meus.filter(a => a.status === 'agendado' && a.data >= hoje).sort((a, b) => (a.data + a.hora).localeCompare(b.data + b.hora)).slice(0, 8);
   const [ic, txt] = statusPush();
   shell(`Olá, ${esc(me.nome.split(' ')[0])}!`, '', `

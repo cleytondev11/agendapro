@@ -43,6 +43,11 @@ Na Central você:
 - Conferiu o comprovante? Central → **Ativar plano / Renovar** (o período já vem marcado: 30 ou 365 dias).
 - Os códigos Pix ficam em `public/assinar.js` (gerados a partir da sua chave, com o valor de cada plano).
 
+## Agenda (Lista, Diário, Semanal e Mensal)
+- **Semanal:** grade de segunda a domingo com os horários do dia; cada atendimento aparece no horário, com cor pela situação (agendado, aguardando sinal, concluído, cancelado, bloqueio). Toque num espaço vazio para marcar ali; toque num atendimento para ver detalhes, concluir, editar, cancelar ou chamar no WhatsApp.
+- **Diário:** a mesma grade, só do dia. **Mensal:** calendário do mês com os horários de cada dia (no celular, a quantidade). **Lista:** o formato antigo.
+- **⛔ Bloquear:** fecha horários (almoço, folga, curso) de um ou de todos os profissionais, num dia ou num período. Os horários bloqueados somem da agenda online dos clientes.
+
 ## Sinal no Pix ao agendar (ex.: 30%)
 - App do dono → **Ajustes → 💠 Pix e sinal**: tipo e chave Pix, nome de quem recebe, cidade e o **% padrão do sinal** (vem 30%).
 - Em **Serviços**, cada serviço pode ter o próprio % (vazio = padrão, 0 = sem sinal).

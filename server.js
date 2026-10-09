@@ -546,6 +546,11 @@ route('GET', T + '/db', 'staff', req => {
 // Funcionário só altera agendamentos da própria agenda e lança a entrada ao concluir.
 function syncFuncionario(E, user, changes) {
   for (const ch of changes) {
+    if (ch.op === 'del' && ch.col === 'agendamentos') { // funcionário só remove bloqueios da própria agenda
+      const ex = E.agendamentos.find(a => a.id === ch.id);
+      if (ex && ex.status === 'bloqueio' && ex.profId === user.profId) E.agendamentos = E.agendamentos.filter(a => a.id !== ch.id);
+      continue;
+    }
     const doc = ch.doc;
     if (ch.op !== 'put' || !doc || typeof doc.id !== 'string') continue;
     if (ch.col === 'agendamentos') {
@@ -705,7 +710,7 @@ function resumo(E) {
     criado: E.meta.criado, vence: E.meta.vence || '', valor: E.meta.valor || 0, obs: E.meta.obs || '',
     bloqueado: !!E.meta.bloqueado, situacao: situacao(E),
     clientes: E.users.filter(u => u.role === 'cliente').length,
-    agMes: E.agendamentos.filter(a => (a.data || '').startsWith(mes) && a.status !== 'cancelado').length,
+    agMes: E.agendamentos.filter(a => (a.data || '').startsWith(mes) && a.status !== 'cancelado' && a.status !== 'bloqueio').length,
     agApp: E.agendamentos.filter(a => (a.data || '').startsWith(mes) && a.criadoPor === 'cliente').length,
     ultimoUso: E.agendamentos.map(a => a.criadoEm || '').sort().pop()?.slice(0, 10) || '',
     aparelhosPush: E.pushSubs.length, trial: !!E.meta.trial, email: E.meta.email || '', origem: E.meta.origem || '',
