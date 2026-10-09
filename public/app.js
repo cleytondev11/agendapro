@@ -11,8 +11,8 @@ const PAGTOS = ['Pix', 'Dinheiro', 'Cartão de débito', 'Cartão de crédito'];
 const CAT_SAIDA = ['Aluguel', 'Energia/Água', 'Internet', 'Salários/Comissões', 'Compra de produtos', 'Manutenção', 'Marketing', 'Impostos', 'Outros'];
 const CAT_ENTRADA = ['Serviço', 'Venda de produto', 'Outros'];
 const COLS = ['users', 'profissionais', 'servicos', 'produtos', 'agendamentos', 'compras', 'vendas', 'lancamentos'];
-const CLI_VIEWS = ['agendar', 'meus', 'perfil'];
-const FUNC_VIEWS = ['agenda', 'resumo', 'perfil'];
+const CLI_VIEWS = ['agendar', 'meus', 'perfil', 'instalar'];
+const FUNC_VIEWS = ['agenda', 'resumo', 'perfil', 'instalar'];
 const staff = () => me?.role === 'admin' || me?.role === 'func';
 const isFunc = () => me?.role === 'func';
 
@@ -327,10 +327,10 @@ function renderLogin(tab = 'entrar') {
 /* ---------------- shell / navegação ---------------- */
 const NAV_ADMIN = [
   ['dashboard', '📊', 'Dashboard'], ['agenda', '📅', 'Agenda'], ['vendas', '🛍️', 'Vendas'], ['financeiro', '💰', 'Financeiro'],
-  ['estoque', '📦', 'Estoque'], ['compras', '🧾', 'Compras'], ['clientes', '👥', 'Clientes'], ['equipe', '🧑‍💼', 'Equipe'], ['servicos', '✂️', 'Serviços'], ['config', '⚙️', 'Ajustes']
+  ['estoque', '📦', 'Estoque'], ['compras', '🧾', 'Compras'], ['clientes', '👥', 'Clientes'], ['equipe', '🧑‍💼', 'Equipe'], ['servicos', '✂️', 'Serviços'], ['config', '⚙️', 'Ajustes'], ['instalar', '📲', 'Instalar app']
 ];
-const NAV_FUNC = [['agenda', '📅', 'Minha agenda'], ['resumo', '📈', 'Meu mês'], ['perfil', '👤', 'Perfil']];
-const NAV_CLI = [['agendar', '➕', 'Agendar'], ['meus', '📅', 'Meus horários'], ['perfil', '👤', 'Perfil']];
+const NAV_FUNC = [['agenda', '📅', 'Minha agenda'], ['resumo', '📈', 'Meu mês'], ['perfil', '👤', 'Perfil'], ['instalar', '📲', 'Instalar']];
+const NAV_CLI = [['agendar', '➕', 'Agendar'], ['meus', '📅', 'Meus horários'], ['perfil', '👤', 'Perfil'], ['instalar', '📲', 'Instalar']];
 
 function shell(title, actions, body) {
   const nav = me.role === 'admin' ? NAV_ADMIN : isFunc() ? NAV_FUNC : NAV_CLI;
@@ -379,11 +379,11 @@ function avisoVencimento() {
 function go(v, keepScroll) {
   if (isFunc()) { if (!FUNC_VIEWS.includes(v)) v = 'agenda'; }
   else if (me.role !== 'admin' && !CLI_VIEWS.includes(v)) v = 'agendar';
-  else if (me.role === 'admin' && CLI_VIEWS.includes(v)) v = 'dashboard';
+  else if (me.role === 'admin' && CLI_VIEWS.includes(v) && v !== 'instalar') v = 'dashboard';
   const mudou = v !== view;
   view = v;
   if (v === 'agendar' && mudou) ui.slots = {};
-  ({ dashboard: vDashboard, agenda: vAgenda, vendas: vVendas, financeiro: vFinanceiro, estoque: vEstoque, compras: vCompras, clientes: vClientes, equipe: vEquipe, servicos: vServicos, config: vConfig, agendar: vAgendar, meus: vMeus, perfil: isFunc() ? vPerfilFunc : vPerfil, resumo: vResumo })[v]();
+  ({ dashboard: vDashboard, agenda: vAgenda, vendas: vVendas, financeiro: vFinanceiro, estoque: vEstoque, compras: vCompras, clientes: vClientes, equipe: vEquipe, servicos: vServicos, config: vConfig, agendar: vAgendar, meus: vMeus, perfil: isFunc() ? vPerfilFunc : vPerfil, resumo: vResumo, instalar: vInstalar })[v]();
   if (!keepScroll) window.scrollTo(0, 0);
 }
 
@@ -1041,6 +1041,10 @@ function vConfig() {
         <div class="acts" style="margin-top:10px"><button class="btn sm" onclick="abrirAssinatura()">💳 ${ASSIN?.trial ? 'Assinar' : 'Renovar'} com Pix</button><button class="btn ghost sm" onclick="abrirAssinatura('anual')">Plano anual −33%</button></div>
         <p class="small" style="margin-top:8px">${PUB.suporte ? `<a style="color:var(--ac)" target="_blank" rel="noopener" href="https://wa.me/${PUB.suporte}">Falar com o suporte</a>` : ''}</p>
       </div>
+      <div class="card" style="margin-top:12px"><h3>📲 Instalar o app</h3>
+        <p class="mut small">Veja como instalar no celular ou no computador, e mande o passo a passo para a sua equipe.</p>
+        <div class="acts" style="margin-top:10px"><button class="btn ghost sm" onclick="go('instalar')">Ver como instalar</button></div>
+      </div>
       <div class="card" style="margin-top:12px"><h3>🎓 Tutorial</h3>
         <p class="mut small">Reveja o passo a passo do app quando quiser.</p>
         <div class="acts" style="margin-top:10px"><button class="btn ghost sm" onclick="Tour.iniciar('boasVindas')">Ver tour de novo</button><button class="btn ghost sm" onclick="Tour.mostrarPassos()">Mostrar primeiros passos</button></div>
@@ -1317,6 +1321,66 @@ async function testarPush() {
     if (el) el.innerHTML = html; else toast(ok ? 'Teste enviado' : 'Falhou', 3000);
   } catch (e) { toast(e.message); }
   if (btn) { btn.disabled = false; btn.textContent = 'Enviar teste'; }
+}
+
+/* ================= INSTALAR APP (PWA) ================= */
+let promptInstalar = null;
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); promptInstalar = e; if (view === 'instalar') vInstalar(); });
+window.addEventListener('appinstalled', () => { promptInstalar = null; toast('📲 App instalado! Procure o ícone na sua tela inicial.', 4000); if (view === 'instalar') vInstalar(); });
+const appInstalado = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+function plataforma() {
+  const ua = navigator.userAgent;
+  if (/iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) return 'ios';
+  if (/Android/.test(ua)) return 'android';
+  return 'pc';
+}
+const ICO_SHARE = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#1f7ae0" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="9" width="16" height="12" rx="2" stroke="#1f7ae0"/><path d="M12 3v11M8 7l4-4 4 4"/></svg>';
+const PASSOS_INSTALAR = {
+  ios: { titulo: 'Instalar no iPhone / iPad', passos: [
+    ['Toque no botão Compartilhar', 'Fica na barra de baixo do Safari (o quadrado com a seta para cima).', ICO_SHARE],
+    ['Toque em "Adicionar à Tela de Início"', 'Pode ser preciso rolar um pouco a lista para baixo.', '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#9b6cf0" stroke-width="3" stroke-linecap="round"><path d="M12 4v16M4 12h16"/></svg>'],
+    ['Toque em "Adicionar" no canto superior', 'Pronto! O ícone aparece na sua tela inicial.', '<span class="ins-pill">Adicionar</span>']],
+    nota: 'No iPhone/iPad só funciona pelo navegador <b>Safari</b>. Se abriu o link pelo Instagram ou WhatsApp, toque em ⋯ e escolha <b>Abrir no Safari</b>.' },
+  android: { titulo: 'Instalar no Android', passos: [
+    ['Abra o menu do Chrome', 'Toque nos 3 pontinhos ⋮ no canto superior direito.', '<b class="ins-dots">⋮</b>'],
+    ['Toque em "Instalar app" ou "Adicionar à tela inicial"', 'O nome muda um pouco conforme o celular.', '<span class="ins-pill">Instalar</span>'],
+    ['Confirme em "Instalar"', 'Pronto! O app aparece na tela inicial e na lista de apps.', '✅']],
+    nota: 'Use o <b>Chrome</b> (ou o Samsung Internet). Se abriu o link pelo Instagram ou WhatsApp, toque em ⋮ e escolha <b>Abrir no Chrome</b>.' },
+  pc: { titulo: 'Instalar no computador', passos: [
+    ['Abra no Chrome ou no Edge', 'Use um desses navegadores no computador.', '🌐'],
+    ['Clique no ícone de instalar na barra de endereço', 'Fica no canto direito do endereço (um monitor com uma seta). Ou menu ⋮ → "Instalar".', '<span class="ins-pill">⤓</span>'],
+    ['Clique em "Instalar"', 'O app abre numa janela própria e ganha atalho na área de trabalho.', '✅']],
+    nota: 'Depois de instalado, você abre o app pelo atalho, sem precisar digitar o endereço.' }
+};
+function vInstalar(aba) {
+  ui.abaInstalar = aba || ui.abaInstalar || plataforma();
+  const a = ui.abaInstalar, p = PASSOS_INSTALAR[a], nome = (S.config && S.config.negocio) || 'AgendaPro';
+  const n = NICHOS[S.config?.nicho] || NICHOS.barbearia;
+  shell('Instalar app', '', `
+  <div class="ins">
+    <div class="ins-head">${logoBox(n.icon)}<div><div class="ins-badges"><span>PWA</span><span class="ok">Seguro</span></div>
+      <h3>Instalar ${esc(nome)}</h3><p class="mut">Tenha o app no seu celular ou computador: abre com um toque, em tela cheia, como qualquer aplicativo.</p></div></div>
+    ${appInstalado() ? `<div class="ins-ok">✅ Você já está usando o app instalado. Tudo certo!</div>` : promptInstalar ? `<button class="btn block ins-agora" onclick="instalarAgora()">📲 Instalar agora</button>` : ''}
+    <div class="ins-cards">
+      <div class="ins-card"><div class="i">📲</div><div><b>Sem loja de apps</b><span>Instala direto do navegador, em segundos.</span></div></div>
+      <div class="ins-card"><div class="i">⚡</div><div><b>Acesso rápido</b><span>Abre pelo ícone da tela inicial, em tela cheia.</span></div></div>
+      <div class="ins-card"><div class="i">🔔</div><div><b>Sempre atualizado</b><span>Recebe as novidades e as notificações automaticamente.</span></div></div>
+    </div>
+    <div class="ins-tabs" role="tablist">
+      ${[['ios', 'iPhone (iOS)'], ['android', 'Android'], ['pc', 'Computador']].map(([k, l]) => `<button role="tab" aria-selected="${a === k}" class="${a === k ? 'on' : ''}" onclick="vInstalar('${k}')">${l}</button>`).join('')}
+    </div>
+    <div class="ins-box">
+      <h4>${p.titulo}</h4><p class="mut small">Siga os 3 passos simples abaixo:</p>
+      <ol class="ins-steps">${p.passos.map(([t, d, ic], i) => `<li><span class="num">${i + 1}</span><div class="grow"><b>${t}</b><span>${d}</span></div><span class="ic">${ic}</span></li>`).join('')}</ol>
+      <div class="ins-nota">Nota: ${p.nota}</div>
+    </div>
+  </div>`);
+}
+async function instalarAgora() {
+  if (!promptInstalar) return vInstalar();
+  promptInstalar.prompt();
+  try { await promptInstalar.userChoice; } catch { }
+  promptInstalar = null; vInstalar();
 }
 
 /* ================= CLIENTE ================= */
