@@ -1,6 +1,6 @@
 # AgendaPro Beleza — agendamento online (multiempresa)
 
-Barbearia · Lash (extensão de cílios) · Manicure & Pedicure · Salão / Cabeleireira
+Barbearia · Lash (extensão de cílios) · Manicure & Pedicure · Salão / Cabeleireira · Bronzeamento
 
 Você vende acessos. Cada assinante ganha **um link próprio** (ex.: `seusite.com/barbearia-do-joao`), com dados totalmente separados.
 Os clientes dele agendam por esse link, de casa, e o horário aparece na hora no painel do assinante.

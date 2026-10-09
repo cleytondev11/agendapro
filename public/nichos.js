@@ -20,6 +20,11 @@
       label: 'Salão / Cabeleireira', icon: '💇‍♀️', cor: '#9a72e0',
       servicos: [['Corte feminino', 70, 60], ['Escova', 50, 45], ['Hidratação', 80, 60], ['Coloração', 150, 120], ['Luzes / Mechas', 300, 240], ['Progressiva', 250, 180]],
       produtos: [['Shampoo profissional', 40, 75, 4], ['Máscara de hidratação', 55, 95, 4], ['Tinta (tubo)', 18, 0, 10], ['Água oxigenada', 14, 0, 4]]
+    },
+    bronzeamento: {
+      label: 'Bronzeamento', icon: '☀️', cor: '#e8913a',
+      servicos: [['Bronzeamento natural (fita)', 120, 120], ['Bronze a jato', 150, 40], ['Bronzeamento artificial (cabine)', 90, 30], ['Marquinha de fita', 100, 90], ['Esfoliação corporal', 60, 40], ['Hidratação pós-sol', 70, 40]],
+      produtos: [['Fita para marquinha (rolo)', 15, 0, 5], ['Acelerador de bronze', 30, 60, 4], ['Hidratante pós-sol', 25, 55, 4], ['Esfoliante corporal', 20, 0, 3]]
     }
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = NICHOS;
