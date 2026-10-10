@@ -16,7 +16,7 @@ const CENTRAL_USUARIO = (process.env.CENTRAL_USUARIO || 'admin').trim().toLowerC
 const CENTRAL_SENHA = process.env.CENTRAL_SENHA || '';
 const SUPORTE = String(process.env.SUPORTE_WHATSAPP || '5561992522517').replace(/\D/g, '');
 const DIAS_TESTE = 3;
-const VALOR_PADRAO = 49.9;
+const VALOR_PADRAO = 39.9;
 const TZ_PADRAO = 'America/Sao_Paulo';
 const PUBLIC = path.join(__dirname, 'public');
 const COLS = ['users', 'profissionais', 'servicos', 'produtos', 'agendamentos', 'compras', 'vendas', 'lancamentos'];
@@ -60,6 +60,11 @@ async function loadDB() {
     console.log('Banco: arquivos em', DATA_DIR, '·', Object.keys(EMP).length, 'empresa(s)');
   }
   if (!META.vapid) { META.vapid = webpush.generateVapidKeys(); marcar('meta'); }
+  // Preço padrão mudou de R$ 49,90 para R$ 39,90: quem estava no padrão antigo passa para o novo (planos ajustados ficam como estão).
+  if (!META.preco3990) {
+    for (const E of Object.values(EMP)) if (Math.abs(Number(E.meta?.valor) - 49.9) < 0.004) { E.meta.valor = VALOR_PADRAO; marcar('t:' + E.meta.slug); }
+    META.preco3990 = true; marcar('meta');
+  }
   if (!CENTRAL_SENHA) console.warn('⚠️  Defina a variável CENTRAL_SENHA para usar a Central (/central).');
   await flush();
 }
@@ -766,7 +771,7 @@ route('POST', '/api/pagamento-informado', null, (req, b) => {
   avisosPg.set(req.ip, [...lst, Date.now()]);
   const E = EMP[str(b.slug, 60)], anual = b.plano === 'anual', ajust = b.plano === 'ajustado' && E && ehAjustado(E);
   const nome = E ? E.config.negocio : (str(b.negocio, 80) || 'Visitante do site');
-  const txt = ajust ? `ajustado · R$ ${valorPlano(E).toFixed(2).replace('.', ',')}` : anual ? 'anual · R$ 399,90' : 'mensal · R$ 49,90';
+  const txt = ajust ? `ajustado · R$ ${valorPlano(E).toFixed(2).replace('.', ',')}` : anual ? 'anual · R$ 399,90' : 'mensal · R$ 39,90';
   evento('pago', `💰 Pagamento informado: ${nome}`, `Plano ${txt}. Confira o comprovante no WhatsApp e libere em "${E?.meta.trial ? 'Ativar plano' : 'Renovar'}" (${anual ? '365' : '30'} dias).`, E ? E.meta.slug : '');
   if (E) { E.meta.pagInformado = { plano: ajust ? 'ajustado' : anual ? 'anual' : 'mensal', em: new Date().toISOString() }; salvar(E); }
   return { ok: true };

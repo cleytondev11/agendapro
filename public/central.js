@@ -158,7 +158,7 @@ function formEmpresa(slug) {
     <div class="row">
       <div><label>Vencimento <span class="mut">(vazio = sem vencimento)</span></label><input type="date" name="vence" id="fVence" value="${venc}">
         <div class="tabs-f" style="margin-top:6px"><button type="button" onclick="$('#fVence').value=addDias(DADOS.hoje,3);$('#fTrial').checked=true">Teste 3 dias</button><button type="button" onclick="$('#fVence').value=addDias(DADOS.hoje,30);$('#fTrial').checked=false">30 dias</button><button type="button" onclick="$('#fVence').value=addDias(DADOS.hoje,365);$('#fTrial').checked=false">1 ano</button></div></div>
-      <div><label>Valor mensal (R$) <span class="mut">(diferente de 49,90 = plano ajustado)</span></label><input name="valor" inputmode="decimal" value="${e ? e.valor : '49,90'}" placeholder="Ex.: 49,90"></div>
+      <div><label>Valor mensal (R$) <span class="mut">(diferente de 39,90 = plano ajustado)</span></label><input name="valor" inputmode="decimal" value="${e ? String(Number(e.valor).toFixed(2)).replace('.', ',') : '39,90'}" placeholder="Ex.: 39,90"></div>
     </div>
     <label>E-mail <span class="mut">(opcional)</span></label><input name="email" type="email" value="${esc(e?.email || '')}">
     <label>Observação</label><input name="obs" value="${esc(e?.obs || '')}" placeholder="Ex.: pago via Pix, plano anual…">
@@ -226,7 +226,7 @@ function renovar(slug) {
     <p class="mut">${esc(e.negocio)} · ${e.vence ? 'vence ' + fmtData(e.vence) : 'sem vencimento'}</p>
     <label>Adicionar</label>
     ${e.ajustado ? `<p class="small" style="margin:4px 0 8px;color:#ffc35a">✨ Plano ajustado: <b>${brl(e.valor)}/mês</b></p>` : ''}
-    <select name="dias">${[[30, e.ajustado ? `30 dias (plano ajustado · ${brl(e.valor)})` : '30 dias (mensal · R$ 49,90)'], [90, `90 dias (trimestral${e.ajustado ? ' · ' + brl(e.valor * 3) : ''})`], [180, `180 dias (semestral${e.ajustado ? ' · ' + brl(e.valor * 6) : ''})`], [365, e.ajustado ? `365 dias (anual · ${brl(e.valor * 12)})` : '365 dias (anual · R$ 399,90)']].map(([d, t]) => `<option value="${d}" ${e.pagInformado?.plano === 'anual' ? (d === 365 ? 'selected' : '') : (d === 30 ? 'selected' : '')}>${t}</option>`).join('')}</select>
+    <select name="dias">${[[30, e.ajustado ? `30 dias (plano ajustado · ${brl(e.valor)})` : '30 dias (mensal · R$ 39,90)'], [90, `90 dias (trimestral${e.ajustado ? ' · ' + brl(e.valor * 3) : ''})`], [180, `180 dias (semestral${e.ajustado ? ' · ' + brl(e.valor * 6) : ''})`], [365, e.ajustado ? `365 dias (anual · ${brl(e.valor * 12)})` : '365 dias (anual · R$ 399,90)']].map(([d, t]) => `<option value="${d}" ${e.pagInformado?.plano === 'anual' ? (d === 365 ? 'selected' : '') : (d === 30 ? 'selected' : '')}>${t}</option>`).join('')}</select>
     ${e.pagInformado ? `<p class="small" style="margin-top:8px;color:#4ee38a">💰 Informou pagamento do plano ${e.pagInformado.plano} em ${new Date(e.pagInformado.em).toLocaleString('pt-BR')}. Confira o comprovante no WhatsApp antes de liberar.</p>` : ''}
     <p class="mut small" style="margin-top:8px">Se ainda estiver em dia, os dias são somados ao vencimento atual. Se estiver vencido ou bloqueado, conta a partir de hoje e o acesso é liberado.</p>
     ${foot('Renovar')}
@@ -251,14 +251,14 @@ function mais(slug) {
     </div>`);
 }
 // Valor especial (desconto) para um assinante: vira "Plano ajustado" no app dele.
-const VALOR_PADRAO = 49.9;
+const VALOR_PADRAO = 39.9;
 function ajustarValor(slug) {
   const e = DADOS.empresas.find(x => x.slug === slug);
   openModal('💲 Valor da mensalidade', `<form>
     <p class="mut">${esc(e.negocio)} · hoje: <b>${brl(e.valor)}/mês</b>${e.ajustado ? ' (plano ajustado)' : ' (padrão)'}</p>
     <label>Novo valor mensal (R$)</label>
     <input name="valor" id="fValor" inputmode="decimal" required value="${String(e.valor.toFixed(2)).replace('.', ',')}" placeholder="Ex.: 39,90">
-    <div class="tabs-f" style="margin-top:8px">${[29.9, 34.9, 39.9, 44.9].map(v => `<button type="button" onclick="$('#fValor').value='${v.toFixed(2).replace('.', ',')}';prevAjuste()">${brl(v)}</button>`).join('')}<button type="button" onclick="$('#fValor').value='49,90';prevAjuste()">Padrão</button></div>
+    <div class="tabs-f" style="margin-top:8px">${[19.9, 24.9, 29.9, 34.9].map(v => `<button type="button" onclick="$('#fValor').value='${v.toFixed(2).replace('.', ',')}';prevAjuste()">${brl(v)}</button>`).join('')}<button type="button" onclick="$('#fValor').value='39,90';prevAjuste()">Padrão</button></div>
     <p class="small" id="fPrev" style="margin-top:10px"></p>
     <p class="mut small" style="margin-top:6px">Na hora em que salvar, o assinante vê o novo valor em <b>Ajustes → Assinatura</b> e na tela de pagamento (com o Pix já no valor certo) e recebe uma notificação. Vale também para as próximas renovações.</p>
     <div class="err" id="mErr"></div>

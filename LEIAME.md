@@ -38,11 +38,11 @@ Na Central você:
 
 ## Pagamento por Pix
 - **Assinar agora** (site, banner do teste, tela de acesso pausado e Ajustes → Assinatura) abre a tela de Pix com QR Code, código copia e cola e a chave.
-- Planos: **Mensal R$ 49,90** e **Anual R$ 399,90** (promoção: de R$ 598,80, economia de R$ 198,90 / 33%).
+- Planos: **Mensal R$ 39,90** e **Anual R$ 399,90** (de R$ 478,80, economia de R$ 78,90 / 16%).
 - **Já paguei** abre o WhatsApp (61) 99252-2517 com a mensagem pronta para anexar o comprovante e avisa a Central (💰 "informou Pix").
 - Conferiu o comprovante? Central → **Ativar plano / Renovar** (o período já vem marcado: 30 ou 365 dias).
 - Os códigos Pix ficam em `public/assinar.js` (gerados a partir da sua chave, com o valor de cada plano).
-- **Plano ajustado (desconto):** Central → botão **💲 Valor** no assinante. Qualquer valor diferente de R$ 49,90 vira **✨ Plano ajustado**: o assinante recebe uma notificação, vê o novo valor em Ajustes → Assinatura e a tela de pagamento mostra só o plano ajustado, com o QR Code e o Pix copia e cola já no valor dele. A renovação na Central já mostra o valor ajustado (30/90/180/365 dias). Botão **Padrão** volta para R$ 49,90.
+- **Plano ajustado (desconto):** Central → botão **💲 Valor** no assinante. Qualquer valor diferente de R$ 39,90 vira **✨ Plano ajustado**: o assinante recebe uma notificação, vê o novo valor em Ajustes → Assinatura e a tela de pagamento mostra só o plano ajustado, com o QR Code e o Pix copia e cola já no valor dele. A renovação na Central já mostra o valor ajustado (30/90/180/365 dias). Botão **Padrão** volta para R$ 39,90.
 
 ## Agenda (Lista, Diário, Semanal e Mensal)
 - **Semanal:** grade de segunda a domingo com os horários do dia; cada atendimento aparece no horário, com cor pela situação (agendado, aguardando sinal, concluído, cancelado, bloqueio). Toque num espaço vazio para marcar ali; toque num atendimento para ver detalhes, concluir, editar, cancelar ou chamar no WhatsApp.
@@ -151,4 +151,4 @@ Sem `DATABASE_URL`, os dados ficam na pasta `data/`. Defina `DATA_DIR` para muda
 - `public/central.html` + `central.js` — a Central de Acessos
 - `public/nichos.js` — serviços e produtos padrão de cada nicho
 - `public/tutorial.mp4` + `tutorial.jpg` — vídeo tutorial (aparece no site, seção **Vídeo**)
-- `public/site.html` — site de vendas. Para mostrar o preço, edite `preco: ''` no fim do arquivo (hoje: `preco: '49,90'`)
+- `public/site.html` — site de vendas. Para mostrar o preço, edite `preco: ''` no fim do arquivo (hoje: `preco: '39,90'`)

@@ -233,7 +233,7 @@ function renderNaoEncontrada() {
 function renderSuspenso(msg) {
   const sup = PUB?.suporte, trial = PUB?.trial;
   const dono = me?.role === 'admin', func = me?.role === 'func';
-  const valor = 'R$ ' + Number(PUB?.valor || 49.9).toFixed(2).replace('.', ',') + '/mês';
+  const valor = 'R$ ' + Number(PUB?.valor || 39.9).toFixed(2).replace('.', ',') + '/mês';
   const titulo = dono ? (trial ? 'Seu teste grátis terminou' : esc(msg || 'Sua assinatura está suspensa ou vencida.'))
     : func ? 'O acesso está suspenso no momento.' : 'A agenda online está temporariamente indisponível.';
   const texto = dono ? (trial ? `Gostou? Assine por <b>${valor}</b> e continue de onde parou: sua agenda, clientes e configurações estão guardados.` : 'Renove para voltar a usar o sistema. Seus dados estão guardados.')
@@ -242,7 +242,7 @@ function renderSuspenso(msg) {
     <p style="margin-top:14px;font-weight:700">${titulo}</p>
     <p class="mut small" style="margin-top:6px">${texto}</p>
     ${dono ? `<button class="btn block" onclick="abrirAssinatura()">${trial ? '💳 Assinar agora com Pix' : '💳 Renovar com Pix'}</button>
-      <p class="mut small" style="margin-top:10px;text-align:center">Mensal R$ 49,90 · Anual R$ 399,90 (33% off)</p>` : ''}
+      <p class="mut small" style="margin-top:10px;text-align:center">Mensal R$ 39,90 · Anual R$ 399,90 (${window.AgendaProAssinar ? AgendaProAssinar.desconto : 16}% off)</p>` : ''}
     ${dono && sup ? `<a class="btn ghost block" target="_blank" rel="noopener" href="https://wa.me/${sup}?text=${encodeURIComponent('Olá! Preciso de ajuda com o acesso do AgendaPro. Negócio: ' + (PUB?.config?.negocio || '') + ' (link /' + SLUG + ').')}">💬 Falar com o suporte</a>` : ''}
     ${dono || func ? '<button class="btn ghost block" onclick="setToken(\'\');location.reload()">Sair</button>' : '<p class="small" style="margin-top:18px"><a href="/entrar" style="color:var(--mut)">É o dono? Entrar no painel</a></p>'}`);
 }
@@ -373,14 +373,14 @@ function avisoVencimento() {
   if (me?.role !== 'admin' || !ASSIN?.vence) return '';
   const dias = Math.round((new Date(ASSIN.vence + 'T12:00') - new Date(today() + 'T12:00')) / 864e5);
   if (ASSIN.trial) {
-    const valor = 'R$ ' + Number(ASSIN.valor || 49.9).toFixed(2).replace('.', ',');
+    const valor = 'R$ ' + Number(ASSIN.valor || 39.9).toFixed(2).replace('.', ',');
     const link = `<button class="btn sm" style="background:#fff;color:#2a1640" onclick="abrirAssinatura()">Assinar agora</button>`;
     return `<div class="card" style="background:linear-gradient(120deg,#7a4fd6,#c0569a);color:#fff;border:0;margin-bottom:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
       <div style="flex:1;min-width:200px"><b>🎁 Teste grátis: ${dias <= 0 ? 'último dia hoje' : `faltam ${dias} dia(s)`}</b><div class="small" style="opacity:.9">Válido até ${fmtData(ASSIN.vence)}. Depois, ${valor}/mês para continuar.</div></div>${link}</div>`;
   }
   if (dias > 5) return '';
   const sup = ` <a href="#" style="color:#1a1300;text-decoration:underline" onclick="abrirAssinatura();return false">Renovar agora</a>`;
-  return `<div class="card" style="background:var(--warn);color:#1a1300;border:0;margin-bottom:14px;font-weight:700">⏳ Sua assinatura ${dias <= 0 ? 'vence hoje' : `vence em ${dias} dia(s)`} (${fmtData(ASSIN.vence)}) · ${ASSIN.ajustado ? 'plano ajustado ' : ''}${brl(ASSIN.valor || 49.9)}/mês.${sup}</div>`;
+  return `<div class="card" style="background:var(--warn);color:#1a1300;border:0;margin-bottom:14px;font-weight:700">⏳ Sua assinatura ${dias <= 0 ? 'vence hoje' : `vence em ${dias} dia(s)`} (${fmtData(ASSIN.vence)}) · ${ASSIN.ajustado ? 'plano ajustado ' : ''}${brl(ASSIN.valor || 39.9)}/mês.${sup}</div>`;
 }
 
 function go(v, keepScroll) {
@@ -1203,8 +1203,8 @@ function vConfig() {
       </div>
       <div class="card" style="margin-top:12px"><h3>Assinatura</h3>
         <p class="small">${ASSIN?.vence ? `${ASSIN.trial ? 'Teste grátis' : 'Válida'} até <b>${fmtData(ASSIN.vence)}</b>` : 'Ativa'}</p>
-        <p class="small" style="margin-top:4px">${ASSIN?.ajustado ? `✨ <b>Plano ajustado</b>: ${brl(ASSIN.valor)}/mês (valor especial)` : `Plano mensal: ${brl(ASSIN?.valor || 49.9)}/mês`}</p>
-        <div class="acts" style="margin-top:10px"><button class="btn sm" onclick="abrirAssinatura()">💳 ${ASSIN?.trial ? 'Assinar' : 'Renovar'} com Pix</button>${ASSIN?.ajustado ? '' : `<button class="btn ghost sm" onclick="abrirAssinatura('anual')">Plano anual −33%</button>`}</div>
+        <p class="small" style="margin-top:4px">${ASSIN?.ajustado ? `✨ <b>Plano ajustado</b>: ${brl(ASSIN.valor)}/mês (valor especial)` : `Plano mensal: ${brl(ASSIN?.valor || 39.9)}/mês`}</p>
+        <div class="acts" style="margin-top:10px"><button class="btn sm" onclick="abrirAssinatura()">💳 ${ASSIN?.trial ? 'Assinar' : 'Renovar'} com Pix</button>${ASSIN?.ajustado ? '' : `<button class="btn ghost sm" onclick="abrirAssinatura('anual')">Plano anual −${window.AgendaProAssinar ? AgendaProAssinar.desconto : 16}%</button>`}</div>
         <p class="small" style="margin-top:8px">${PUB.suporte ? `<a style="color:var(--ac)" target="_blank" rel="noopener" href="https://wa.me/${PUB.suporte}">Falar com o suporte</a>` : ''}</p>
       </div>
       <div class="card" style="margin-top:12px"><h3>📲 Instalar o app</h3>
