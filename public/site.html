@@ -796,7 +796,7 @@ function mostraCiclo(c) {
   }
 }
 document.querySelectorAll('[data-ciclo]').forEach(b => b.addEventListener('click', () => mostraCiclo(b.dataset.ciclo)));
-$('#btnAssinar').addEventListener('click', () => window.AgendaProAssinar && AgendaProAssinar.abrir({ plano: ciclo }));
+$('#btnAssinar').addEventListener('click', () => window.AgendaProAssinar && AgendaProAssinar.abrir({ plano: ciclo, cadastro: true }));
 mostraCiclo('mensal');
 $('#ano').textContent = new Date().getFullYear();
 

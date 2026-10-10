@@ -37,6 +37,7 @@ Na Central você:
 - O mesmo e-mail ou WhatsApp não consegue criar outro teste.
 
 ## Pagamento por Pix
+- **No site, "Assinar agora"** pede primeiro os dados (nome, negócio, ramo, WhatsApp, e-mail e senha) e cria a conta na hora, já liberada por 3 dias. Depois mostra o Pix e o botão **Já paguei — enviar comprovante** (WhatsApp com nome, negócio, WhatsApp, link e usuário). Na Central a conta aparece com **🛒 assinou pelo site · aguardando Pix**. Se a pessoa já tem conta, basta usar a mesma senha que o pagamento fica ligado a ela.
 - **Assinar agora** (site, banner do teste, tela de acesso pausado e Ajustes → Assinatura) abre a tela de Pix com QR Code, código copia e cola e a chave.
 - Planos: **Mensal R$ 39,90** e **Anual R$ 399,90** (de R$ 478,80, economia de R$ 78,90 / 16%).
 - **Já paguei** abre o WhatsApp (61) 99252-2517 com a mensagem pronta para anexar o comprovante e avisa a Central (💰 "informou Pix").

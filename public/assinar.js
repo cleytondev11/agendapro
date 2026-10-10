@@ -52,7 +52,18 @@
   .apx-done{text-align:center;display:grid;gap:10px;justify-items:center;padding:10px 0}
   .apx-done .c{width:62px;height:62px;border-radius:50%;background:#25d366;display:grid;place-items:center;font-size:30px;color:#06301a}
   .apx-done p{margin:0;color:#cfc7da;font-size:.92rem}
-  @media (max-width:420px){.apx{padding:18px}.apx-p .v{font-size:1.15rem}}
+  .apx-f label{display:block;font-size:.78rem;font-weight:700;color:#cfc7da;margin:12px 0 5px}
+  .apx-f input,.apx-f select{width:100%;font:500 16px 'Manrope',system-ui,sans-serif;color:#f4f0f7;background:#120f17;border:1px solid #322b3d;border-radius:11px;padding:12px}
+  .apx-f input:focus,.apx-f select:focus{outline:2px solid #3fbf8a;border-color:transparent}
+  .apx-g2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .apx-err{color:#ff8f8f;font-size:.86rem;margin-top:10px;min-height:1em}
+  .apx-alt{display:block;text-align:center;margin-top:10px;font-size:.85rem;color:#a89fb5;background:none;border:0;cursor:pointer;text-decoration:underline;width:100%;font-family:inherit}
+  .apx-passos{display:flex;gap:6px;margin:2px 0 14px;font-size:.75rem;font-weight:700;color:#a89fb5}
+  .apx-passos span{flex:1;padding:7px 8px;border-radius:9px;background:#120f17;border:1px solid #322b3d;text-align:center}
+  .apx-passos span.on{color:#06301a;background:#3fbf8a;border-color:#3fbf8a}
+  .apx-okbox{background:color-mix(in srgb,#3fbf8a 14%,#120f17);border:1px solid color-mix(in srgb,#3fbf8a 45%,#322b3d);border-radius:13px;padding:12px 14px;font-size:.88rem;margin:4px 0 6px;line-height:1.45}
+  .apx-okbox a{color:#7ff0b8;font-weight:700}
+  @media (max-width:420px){.apx{padding:18px}.apx-p .v{font-size:1.15rem}.apx-g2{grid-template-columns:1fr}}
   `;
   let estilo = false, ctx = {}, plano = 'mensal';
   // Plano ajustado: valor especial definido na Central para este assinante (código Pix vem do servidor).
@@ -69,11 +80,67 @@
   function fechar() { const el = document.getElementById('apx'); if (el) el.remove(); document.removeEventListener('keydown', esc_); }
   function esc_(e) { if (e.key === 'Escape') fechar(); }
 
+  const RAMOS = [['barbearia', 'Barbearia'], ['lash', 'Lash / Extensão de cílios'], ['manicure', 'Manicure & Pedicure'], ['cabeleireira', 'Salão / Cabeleireira'], ['bronzeamento', 'Bronzeamento']];
+  const cardsPlanos = () => `<div class="apx-pl">
+        <button type="button" class="apx-p" data-p="mensal" aria-pressed="${plano === 'mensal'}"><b>Mensal</b><div class="v">${brl(PLANOS.mensal.valor)}<small>/mês</small></div><div class="s">Renova a cada 30 dias</div></button>
+        <button type="button" class="apx-p" data-p="anual" aria-pressed="${plano === 'anual'}"><span class="apx-tag">−${desconto}% PROMOÇÃO</span><b>Anual</b><div class="v">${brl(PLANOS.anual.valor)}<small>/ano</small></div><div class="s"><del>${brl(cheio)}</del> · sai por ${brl(PLANOS.anual.valor / 12)}/mês</div></button>
+      </div>`;
+  const passos = n => ctx.cadastro ? `<div class="apx-passos"><span class="${n === 1 ? 'on' : ''}">1 · Seus dados</span><span class="${n === 2 ? 'on' : ''}">2 · Pagamento</span><span>3 · Comprovante</span></div>` : '';
+  // Passo 1 (site): cadastro antes do pagamento
+  function renderCadastro(erro) {
+    const el = document.getElementById('apx'), d = ctx.dados || {};
+    el.innerHTML = `<div class="apx" role="dialog" aria-modal="true" aria-label="Assinar o AgendaPro">
+      <div class="apx-h"><h3>Assinar o AgendaPro</h3><button class="apx-x" data-a="fechar" aria-label="Fechar">✕</button></div>
+      ${passos(1)}
+      <p class="apx-sub" style="margin-top:0">Escolha o plano e preencha seus dados. A conta é criada na hora e você já pode usar enquanto confirmamos o Pix.</p>
+      ${cardsPlanos()}
+      <form class="apx-f" id="apxForm" novalidate>
+        <label for="apxNome">Nome completo</label><input id="apxNome" name="nome" required autocomplete="name" value="${esc(d.nome || '')}" placeholder="Seu nome e sobrenome">
+        <label for="apxLoja">Nome do seu negócio</label><input id="apxLoja" name="loja" required value="${esc(d.loja || '')}" placeholder="Ex.: Studio Maria Lash">
+        <label for="apxRamo">Seu ramo</label><select id="apxRamo" name="nicho">${RAMOS.map(([k, l]) => `<option value="${k}" ${d.nicho === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
+        <div class="apx-g2">
+          <div><label for="apxWa">WhatsApp</label><input id="apxWa" name="whatsapp" required inputmode="tel" autocomplete="tel" value="${esc(d.whatsapp || '')}" placeholder="(61) 99999-9999"></div>
+          <div><label for="apxEmail">E-mail (será seu login)</label><input id="apxEmail" name="email" type="email" required autocomplete="email" value="${esc(d.email || '')}" placeholder="voce@email.com"></div>
+        </div>
+        <label for="apxSenha">Crie uma senha</label><input id="apxSenha" name="senha" type="password" required minlength="6" autocomplete="new-password" placeholder="Mínimo 6 caracteres">
+        <div class="apx-err" id="apxErr">${erro ? esc(erro) : ''}</div>
+        <button class="apx-btn apx-ok" style="margin-top:8px" type="submit">Continuar para o pagamento →</button>
+        ${erro ? `<button type="button" class="apx-alt" data-a="sem-conta">Seguir para o pagamento mesmo assim</button>` : ''}
+      </form>
+    </div>`;
+    const tel = el.querySelector('#apxWa');
+    tel.addEventListener('input', () => { const v = tel.value.replace(/\D/g, '').slice(0, 11); tel.value = v.length > 10 ? `(${v.slice(0, 2)}) ${v.slice(2, 7)}-${v.slice(7)}` : v.length > 6 ? `(${v.slice(0, 2)}) ${v.slice(2, 6)}-${v.slice(6)}` : v.length > 2 ? `(${v.slice(0, 2)}) ${v.slice(2)}` : v; });
+    el.querySelector('#apxForm').addEventListener('submit', enviarCadastro);
+    setTimeout(() => el.querySelector('#apxNome')?.focus(), 60);
+  }
+  async function enviarCadastro(e) {
+    e.preventDefault();
+    const f = Object.fromEntries(new FormData(e.target)), btn = e.target.querySelector('button[type=submit]');
+    ctx.dados = { ...f, senha: '' };
+    const err = msg => { document.getElementById('apxErr').textContent = msg; };
+    if (f.nome.trim().split(/\s+/).length < 2) return err('Informe seu nome completo.');
+    if (f.loja.trim().length < 2) return err('Informe o nome do seu negócio.');
+    if (f.whatsapp.replace(/\D/g, '').length < 10) return err('Informe o WhatsApp com DDD.');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(f.email.trim())) return err('Informe um e-mail válido.');
+    if ((f.senha || '').length < 6) return err('A senha precisa ter pelo menos 6 caracteres.');
+    btn.disabled = true; btn.textContent = 'Criando sua conta…';
+    try {
+      const r = await fetch('/api/teste', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...f, assinar: plano }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.erro || 'Não foi possível criar a conta agora.');
+      try { localStorage.setItem('agendapro_token_' + j.slug, j.token); } catch { }
+      Object.assign(ctx, { slug: j.slug, login: j.login, negocio: f.loja.trim(), nome: f.nome.trim(), whats: f.whatsapp, existente: !!j.existente, cadastrado: true });
+      render(); document.getElementById('apx').scrollTop = 0;
+    } catch (ex) { renderCadastro(ex.message); }
+  }
+
   function render() {
     const p = planoAtual(), el = document.getElementById('apx');
     el.innerHTML = `<div class="apx" role="dialog" aria-modal="true" aria-label="Assinar o AgendaPro">
       <div class="apx-h"><h3>Assinar o AgendaPro</h3><button class="apx-x" data-a="fechar" aria-label="Fechar">✕</button></div>
-      <p class="apx-sub">${ctx.negocio ? esc(ctx.negocio) + ' · ' : ''}Escolha o plano e pague com Pix.</p>
+      ${passos(2)}
+      ${ctx.cadastrado ? `<div class="apx-okbox">✅ ${ctx.existente ? 'Encontramos a sua conta' : 'Conta criada'}! Usuário: <b>${esc(ctx.login)}</b><br>${ctx.existente ? '' : 'Você já pode usar por 3 dias enquanto confirmamos o pagamento. '}<a href="/${esc(ctx.slug)}" target="_blank" rel="noopener">Abrir meu painel ↗</a></div>` : ''}
+      <p class="apx-sub">${ctx.negocio ? esc(ctx.negocio) + ' · ' : ''}${ctx.cadastrado ? 'Agora pague com Pix e envie o comprovante.' : 'Escolha o plano e pague com Pix.'}</p>
       ${ctx.ajustado ? `<div class="apx-pl" style="grid-template-columns:1fr"><button class="apx-p" data-p="ajustado" aria-pressed="true"><span class="apx-tag">✨ VALOR ESPECIAL</span><b>Plano ajustado</b><div class="v">${brl(Number(ctx.ajustado.valor))}<small>/mês</small></div><div class="s">Valor combinado com você · renova a cada 30 dias</div></button></div>` : `<div class="apx-pl">
         <button class="apx-p" data-p="mensal" aria-pressed="${plano === 'mensal'}"><b>Mensal</b><div class="v">${brl(PLANOS.mensal.valor)}<small>/mês</small></div><div class="s">Renova a cada 30 dias</div></button>
         <button class="apx-p" data-p="anual" aria-pressed="${plano === 'anual'}"><span class="apx-tag">−${desconto}% PROMOÇÃO</span><b>Anual</b><div class="v">${brl(PLANOS.anual.valor)}<small>/ano</small></div><div class="s"><del>${brl(cheio)}</del> · sai por ${brl(PLANOS.anual.valor / 12)}/mês<br>Economize ${brl(economia)}</div></button>
@@ -95,15 +162,17 @@
   function pago() {
     const p = planoAtual();
     const msg = `Olá! Acabei de pagar o AgendaPro via Pix.\n\n📦 Plano: ${p.nome} — ${brl(p.valor)}${p.periodo}` +
-      (ctx.negocio ? `\n🏪 Negócio: ${ctx.negocio}` : '') + (ctx.slug ? `\n🔗 Link: ${location.origin}/${ctx.slug}` : '') +
+      (ctx.nome ? `\n🙋 Nome: ${ctx.nome}` : '') + (ctx.negocio ? `\n🏪 Negócio: ${ctx.negocio}` : '') + (ctx.whats ? `\n📱 WhatsApp: ${ctx.whats}` : '') + (ctx.slug ? `\n🔗 Link: ${location.origin}/${ctx.slug}` : '') +
       (ctx.login ? `\n👤 Usuário: ${ctx.login}` : '') + `\n\nSegue o comprovante 👇`;
     const url = `https://wa.me/${WHATS}?text=${encodeURIComponent(msg)}`;
     try { fetch('/api/pagamento-informado', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ plano, slug: ctx.slug || '', negocio: ctx.negocio || '', login: ctx.login || '' }) }).catch(() => { }); } catch { }
     const a = document.createElement('a'); a.href = url; a.target = '_blank'; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove();
-    document.querySelector('#apx .apx').innerHTML = `<div class="apx-done">
+    document.getElementById('apx').scrollTop = 0;
+    document.querySelector('#apx .apx').innerHTML = `${ctx.cadastro ? '<div class="apx-passos"><span>1 · Seus dados</span><span>2 · Pagamento</span><span class="on">3 · Comprovante</span></div>' : ''}<div class="apx-done">
       <div class="c">✓</div><h3 style="margin:0;font-family:'Fraunces',Georgia,serif;font-size:1.4rem">Agora é só enviar o comprovante</h3>
       <p>Abrimos o WhatsApp com a mensagem pronta. <b>Anexe o comprovante do Pix</b> e envie.</p>
       <p>Assim que o pagamento for confirmado, seu acesso é liberado por <b>${p.dias === 365 ? '1 ano' : '30 dias'}</b>.</p>
+      ${ctx.slug ? `<a class="apx-btn apx-gh" style="margin-top:4px" href="/${esc(ctx.slug)}">Entrar no meu painel</a>` : ''}
       <a class="apx-btn apx-ok" href="${url}" target="_blank" rel="noopener">Abrir o WhatsApp de novo</a>
       <button class="apx-btn apx-gh" data-a="fechar">Fechar</button></div>`;
   }
@@ -115,15 +184,16 @@
     const bg = document.createElement('div'); bg.id = 'apx'; bg.className = 'apx-bg';
     bg.addEventListener('click', e => {
       if (e.target === bg) return fechar();
-      const pl = e.target.closest('[data-p]'); if (pl) { plano = pl.dataset.p; return render(); }
+      const pl = e.target.closest('[data-p]'); if (pl) { plano = pl.dataset.p; if (document.getElementById('apxForm')) { ctx.dados = Object.fromEntries(new FormData(document.getElementById('apxForm'))); delete ctx.dados.senha; return renderCadastro(); } return render(); }
       const a = e.target.closest('[data-a]'); if (!a) return;
       if (a.dataset.a === 'fechar') fechar();
       else if (a.dataset.a === 'cc') copiar(planoAtual().pix, a);
       else if (a.dataset.a === 'chave') copiar(CHAVE, a);
       else if (a.dataset.a === 'paguei') pago();
+      else if (a.dataset.a === 'sem-conta') { const d = ctx.dados || {}; Object.assign(ctx, { negocio: d.loja, nome: d.nome, whats: d.whatsapp, login: d.email }); render(); }
     });
     document.body.appendChild(bg); document.addEventListener('keydown', esc_);
-    render();
+    if (ctx.cadastro && !ctx.slug) renderCadastro(); else render();
   }
   window.AgendaProAssinar = { abrir, PLANOS, desconto, economia, cheio, brl };
 })();

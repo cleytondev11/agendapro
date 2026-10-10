@@ -730,7 +730,7 @@ function resumo(E) {
     ultimoUso: E.agendamentos.map(a => a.criadoEm || '').sort().pop()?.slice(0, 10) || '',
     aparelhosPush: E.pushSubs.length, trial: !!E.meta.trial, email: E.meta.email || '', origem: E.meta.origem || '',
     funcionarios: E.users.filter(u => u.role === 'func').length,
-    pagInformado: E.meta.pagInformado || null, temLogo: !!E.config.empresa?.logo, cnpj: E.config.empresa?.cnpj || ''
+    pagInformado: E.meta.pagInformado || null, pagPendente: E.meta.pagPendente || null, temLogo: !!E.config.empresa?.logo, cnpj: E.config.empresa?.cnpj || ''
   };
 }
 route('GET', '/api/central/empresas', 'central', () => ({
@@ -773,7 +773,7 @@ route('POST', '/api/pagamento-informado', null, (req, b) => {
   const nome = E ? E.config.negocio : (str(b.negocio, 80) || 'Visitante do site');
   const txt = ajust ? `ajustado · R$ ${valorPlano(E).toFixed(2).replace('.', ',')}` : anual ? 'anual · R$ 399,90' : 'mensal · R$ 39,90';
   evento('pago', `💰 Pagamento informado: ${nome}`, `Plano ${txt}. Confira o comprovante no WhatsApp e libere em "${E?.meta.trial ? 'Ativar plano' : 'Renovar'}" (${anual ? '365' : '30'} dias).`, E ? E.meta.slug : '');
-  if (E) { E.meta.pagInformado = { plano: ajust ? 'ajustado' : anual ? 'anual' : 'mensal', em: new Date().toISOString() }; salvar(E); }
+  if (E) { E.meta.pagInformado = { plano: ajust ? 'ajustado' : anual ? 'anual' : 'mensal', em: new Date().toISOString() }; delete E.meta.pagPendente; salvar(E); }
   return { ok: true };
 });
 
@@ -789,16 +789,28 @@ route('POST', '/api/teste', null, async (req, b) => {
   if (String(b.senha || '').length < 6) fail(400, 'Crie uma senha com pelo menos 6 caracteres.');
   const tel = whats.replace(/^55(?=\d{10,11}$)/, '');
   const ja = Object.values(EMP).find(E => E.meta.email === email || digits(E.meta.donoTel).replace(/^55(?=\d{10,11}$)/, '') === tel || E.users.some(u => u.role === 'admin' && u.login === email));
-  if (ja || META.testesUsados.includes(email) || META.testesUsados.includes(tel)) fail(409, 'Já existe uma conta com esse e-mail ou WhatsApp. Entre em /entrar ou chame no WhatsApp para assinar.');
+  const assinar = ['mensal', 'anual'].includes(b.assinar) ? b.assinar : '';
+  if (assinar && ja) { // já tem conta e quer assinar: se a senha confere, segue para o pagamento dessa conta
+    const dono = ja.users.find(u => u.role === 'admin');
+    if (dono && dono.login === email && checkPw(b.senha, dono.senha)) {
+      ja.meta.pagPendente = { plano: assinar, em: new Date().toISOString() };
+      const token = novaSessao(ja.sessions, dono.id); salvar(ja);
+      evento('assinatura', `🛒 Quer assinar: ${ja.config.negocio}`, `Plano ${assinar}. Conta já existente (${email}). Aguardando o Pix.`, ja.meta.slug);
+      return { slug: ja.meta.slug, token, login: email, vence: ja.meta.vence, existente: true };
+    }
+    fail(409, 'Já existe uma conta com esse e-mail ou WhatsApp. Use a mesma senha da sua conta, ou siga para o pagamento abaixo.');
+  }
+  if (ja || META.testesUsados.includes(email) || META.testesUsados.includes(tel)) fail(409, assinar ? 'Já existe uma conta com esse e-mail ou WhatsApp. Use a mesma senha da sua conta, ou siga para o pagamento abaixo.' : 'Já existe uma conta com esse e-mail ou WhatsApp. Entre em /entrar ou chame no WhatsApp para assinar.');
   const ip = cadastrosIp.get(req.ip) || []; const recentes = ip.filter(t => Date.now() - t < 864e5);
   if (recentes.length >= 3) fail(429, 'Muitos cadastros deste aparelho hoje. Chame no WhatsApp.');
   cadastrosIp.set(req.ip, [...recentes, Date.now()]);
   const vence = somaDias(hojeSP(), DIAS_TESTE);
-  const E = await criarEmpresa({ negocio: loja, nicho, login: email, senha: b.senha, dono: nome, donoTel: str(b.whatsapp, 30), email, vence, valor: VALOR_PADRAO, trial: true, obs: 'Teste grátis pelo site' }, { origem: 'site' });
+  const E = await criarEmpresa({ negocio: loja, nicho, login: email, senha: b.senha, dono: nome, donoTel: str(b.whatsapp, 30), email, vence, valor: VALOR_PADRAO, trial: true, obs: assinar ? `Assinatura pelo site (plano ${assinar}) · aguardando Pix` : 'Teste grátis pelo site' }, { origem: 'site', ...(assinar ? { pagPendente: { plano: assinar, em: new Date().toISOString() } } : {}) });
   META.testesUsados.push(email, tel); marcar('meta');
   const dono = E.users.find(u => u.role === 'admin');
   const token = novaSessao(E.sessions, dono.id); salvar(E);
-  evento('teste', `🎉 Novo teste grátis: ${loja}`, `${nome} · ${NICHOS[nicho].label} · WhatsApp ${str(b.whatsapp, 30)} · ${email}`, E.meta.slug);
+  if (assinar) evento('assinatura', `🛒 Nova assinatura: ${loja}`, `${nome} · ${NICHOS[nicho].label} · plano ${assinar} · WhatsApp ${str(b.whatsapp, 30)} · ${email}. Conta criada (3 dias liberados) e aguardando o Pix.`, E.meta.slug);
+  else evento('teste', `🎉 Novo teste grátis: ${loja}`, `${nome} · ${NICHOS[nicho].label} · WhatsApp ${str(b.whatsapp, 30)} · ${email}`, E.meta.slug);
   return { slug: E.meta.slug, token, login: email, vence };
 });
 
@@ -846,7 +858,7 @@ route('PUT', '/api/central/empresas/:slug', 'central', async (req, b, p) => {
 route('POST', '/api/central/empresas/:slug/renovar', 'central', async (req, b, p) => {
   const E = empCentral(p.slug), dias = Math.min(Math.max(parseInt(b.dias) || 30, 1), 3660);
   const base = E.meta.vence && E.meta.vence > hojeSP() ? E.meta.vence : hojeSP();
-  E.meta.vence = somaDias(base, dias); E.meta.bloqueado = false; E.meta.trial = false; E.meta.avisos = {}; delete E.meta.pagInformado;
+  E.meta.vence = somaDias(base, dias); E.meta.bloqueado = false; E.meta.trial = false; E.meta.avisos = {}; delete E.meta.pagInformado; delete E.meta.pagPendente;
   changed(E); if (!(await gravarAgora())) fail(503, ERRO_BANCO);
   return { empresa: resumo(E) };
 });
