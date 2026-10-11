@@ -80,7 +80,7 @@
   function fechar() { const el = document.getElementById('apx'); if (el) el.remove(); document.removeEventListener('keydown', esc_); }
   function esc_(e) { if (e.key === 'Escape') fechar(); }
 
-  const RAMOS = [['barbearia', 'Barbearia'], ['lash', 'Lash / Extensão de cílios'], ['manicure', 'Manicure & Pedicure'], ['cabeleireira', 'Salão / Cabeleireira'], ['bronzeamento', 'Bronzeamento']];
+  const RAMOS = [['barbearia', 'Barbearia'], ['lash', 'Lash / Extensão de cílios'], ['manicure', 'Manicure & Pedicure'], ['cabeleireira', 'Salão / Cabeleireira'], ['bronzeamento', 'Bronzeamento'], ['depilacao', 'Depilação'], ['maquiadora', 'Maquiadora']];
   const cardsPlanos = () => `<div class="apx-pl">
         <button type="button" class="apx-p" data-p="mensal" aria-pressed="${plano === 'mensal'}"><b>Mensal</b><div class="v">${brl(PLANOS.mensal.valor)}<small>/mês</small></div><div class="s">Renova a cada 30 dias</div></button>
         <button type="button" class="apx-p" data-p="anual" aria-pressed="${plano === 'anual'}"><span class="apx-tag">−${desconto}% PROMOÇÃO</span><b>Anual</b><div class="v">${brl(PLANOS.anual.valor)}<small>/ano</small></div><div class="s"><del>${brl(cheio)}</del> · sai por ${brl(PLANOS.anual.valor / 12)}/mês</div></button>

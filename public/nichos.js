@@ -25,6 +25,16 @@
       label: 'Bronzeamento', icon: '☀️', cor: '#e8913a',
       servicos: [['Bronzeamento natural (fita)', 120, 120], ['Bronze a jato', 150, 40], ['Bronzeamento artificial (cabine)', 90, 30], ['Marquinha de fita', 100, 90], ['Esfoliação corporal', 60, 40], ['Hidratação pós-sol', 70, 40]],
       produtos: [['Fita para marquinha (rolo)', 15, 0, 5], ['Acelerador de bronze', 30, 60, 4], ['Hidratante pós-sol', 25, 55, 4], ['Esfoliante corporal', 20, 0, 3]]
+    },
+    depilacao: {
+      label: 'Depilação', icon: '🌸', cor: '#3bb0a0',
+      servicos: [['Buço', 20, 10], ['Axilas', 25, 15], ['Meia perna', 40, 30], ['Perna inteira', 70, 45], ['Virilha completa', 60, 40], ['Sobrancelha com linha', 25, 20]],
+      produtos: [['Cera quente (kg)', 45, 0, 3], ['Cera roll-on (refil)', 12, 0, 10], ['Óleo pós-depilação', 18, 40, 5], ['Espátulas (pct)', 10, 0, 5]]
+    },
+    maquiadora: {
+      label: 'Maquiadora', icon: '💄', cor: '#c2477a',
+      servicos: [['Maquiagem social', 150, 60], ['Maquiagem de noiva', 450, 120], ['Madrinha / formatura', 180, 75], ['Maquiagem express', 90, 40], ['Aula de automaquiagem', 250, 120], ['Aplicação de cílios postiços', 30, 15]],
+      produtos: [['Cílios postiços (par)', 8, 25, 10], ['Base (un)', 60, 0, 2], ['Fixador de maquiagem', 45, 0, 2], ['Lenços demaquilantes', 15, 0, 3]]
     }
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = NICHOS;

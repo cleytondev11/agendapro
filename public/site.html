@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#120f17">
 <link rel="icon" href="/icons/icon-192.png">
 <title>AgendaPro Beleza</title>
-<meta name="description" content="Agendamento online e gestão completa para barbearias, lash designers, manicures, salões e bronzeamento. Seu cliente agenda pelo celular e você é avisado na hora.">
+<meta name="description" content="Agendamento online e gestão completa para barbearias, lash designers, manicures, salões, bronzeamento, depilação e maquiadoras. Seu cliente agenda pelo celular e você é avisado na hora.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;1,9..144,500;1,9..144,600&family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
@@ -164,7 +164,8 @@ section{padding-block:88px}
 .band{background:var(--panel);border-block:1px solid var(--line)}
 
 /* nichos */
-.ncards{display:grid;grid-template-columns:repeat(auto-fit,minmax(196px,1fr));gap:14px;margin-top:40px}
+.ncards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-top:40px}
+@media (max-width:980px){.ncards{grid-template-columns:repeat(auto-fit,minmax(196px,1fr))}}
 .nc{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:22px;display:flex;flex-direction:column;gap:14px;transition:transform .35s,border-color .35s,box-shadow .35s;overflow:hidden;min-width:0}
 .nc::before{content:"";position:absolute;inset:0 0 auto;height:3px;background:var(--c)}
 .nc:hover{transform:translateY(-6px);border-color:color-mix(in srgb,var(--c) 60%,var(--line));box-shadow:0 30px 60px -30px color-mix(in srgb,var(--c) 50%,transparent)}
@@ -408,6 +409,8 @@ footer a{color:var(--text);font-weight:700}
             <button class="chip" type="button" data-n="manicure" style="--c:#ee8a6c" aria-pressed="false"><i class="dot"></i>Manicure &amp; Pedicure</button>
             <button class="chip" type="button" data-n="cabeleireira" style="--c:#a988ee" aria-pressed="false"><i class="dot"></i>Salão</button>
             <button class="chip" type="button" data-n="bronzeamento" style="--c:#e8913a" aria-pressed="false"><i class="dot"></i>Bronzeamento</button>
+            <button class="chip" type="button" data-n="depilacao" style="--c:#3bb0a0" aria-pressed="false"><i class="dot"></i>Depilação</button>
+            <button class="chip" type="button" data-n="maquiadora" style="--c:#c2477a" aria-pressed="false"><i class="dot"></i>Maquiadora</button>
           </div>
         </div>
         <div class="fatos">
@@ -520,6 +523,20 @@ footer a{color:var(--text);font-weight:700}
           <ul><li><span>Natural (fita)</span><span>120 min</span></li><li><span>Bronze a jato</span><span>40 min</span></li><li><span>Cabine</span><span>30 min</span></li><li><span>Esfoliação</span><span>40 min</span></li></ul>
           <p class="obs">Sinal no Pix garante a vaga nos dias de sol.</p>
           <a href="#teste" data-teste="bronzeamento">Testar no meu espaço →</a>
+        </article>
+        <article class="nc rv d3" style="--c:#3bb0a0">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c2 3 5 4.5 5 8a5 5 0 0 1-10 0c0-3.5 3-5 5-8Z"/><path d="M9.5 13a2.5 2.5 0 0 0 2.5 2.5"/></svg></div>
+          <h3>Depilação</h3>
+          <ul><li><span>Buço</span><span>10 min</span></li><li><span>Axilas</span><span>15 min</span></li><li><span>Perna inteira</span><span>45 min</span></li><li><span>Virilha completa</span><span>40 min</span></li></ul>
+          <p class="obs">Atendimentos curtos em sequência, sem buraco na agenda.</p>
+          <a href="#teste" data-teste="depilacao">Testar no meu espaço →</a>
+        </article>
+        <article class="nc rv d3" style="--c:#c2477a">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21h6V11H9Z"/><path d="M10 11V6l4-3v8"/></svg></div>
+          <h3>Maquiadora</h3>
+          <ul><li><span>Social</span><span>60 min</span></li><li><span>Noiva</span><span>120 min</span></li><li><span>Madrinha</span><span>75 min</span></li><li><span>Express</span><span>40 min</span></li></ul>
+          <p class="obs">Sinal no Pix garante as datas de evento.</p>
+          <a href="#teste" data-teste="maquiadora">Testar no meu studio →</a>
         </article>
       </div>
     </div>
@@ -651,6 +668,8 @@ footer a{color:var(--text);font-weight:700}
               <option value="manicure">Manicure &amp; Pedicure</option>
               <option value="cabeleireira">Salão / Cabeleireira</option>
               <option value="bronzeamento">Bronzeamento</option>
+              <option value="depilacao">Depilação</option>
+              <option value="maquiadora">Maquiadora</option>
             </select>
             <div class="grid2">
               <div><label for="tWhats">WhatsApp</label><input id="tWhats" name="whatsapp" inputmode="tel" autocomplete="tel" required placeholder="(61) 99999-9999"></div>
@@ -747,7 +766,7 @@ footer a{color:var(--text);font-weight:700}
         <div class="contato">
           <small>WhatsApp para contato</small>
           <div class="num"><output id="fone">(61) 99252-2517</output><button class="copy" type="button" id="copiar">Copiar</button></div>
-          <span class="mut" style="font-size:.88rem">Atendimento para barbearias, lash designers, manicures, salões e bronzeamento de todo o Brasil.</span>
+          <span class="mut" style="font-size:.88rem">Atendimento para barbearias, lash designers, manicures, salões, bronzeamento, depilação e maquiadoras de todo o Brasil.</span>
         </div>
       </div>
     </div>
@@ -756,7 +775,7 @@ footer a{color:var(--text);font-weight:700}
 
 <footer>
   <div class="wrap">
-    <span>© <span id="ano">2026</span> AgendaPro · Agendamento online para barbearias, lash, manicures, salões e bronzeamento.</span>
+    <span>© <span id="ano">2026</span> AgendaPro · Agendamento online para barbearias, lash, manicures, salões, bronzeamento, depilação e maquiagem.</span>
     <span>Já é assinante? <a href="/entrar">Entrar no painel</a></span>
   </div>
 </footer>
@@ -824,7 +843,13 @@ const NICHOS = {
     ag: [['09:30', 'Luana', 'Coloração', 150], ['13:30', 'Sônia', 'Escova', 50]] },
   bronzeamento: { cor: '#e8913a', ink: '#2a1504', txt: 'espaços de bronzeamento', neg: 'Bronze da Dani', cli: 'Fernanda',
     sv: [['Bronzeamento natural', 120, 120], ['Bronze a jato', 150, 40], ['Esfoliação', 60, 40]], pick: 0, hora: '09:00',
-    ag: [['08:00', 'Aline', 'Bronze a jato', 150], ['10:30', 'Vanessa', 'Bronzeamento natural', 120]] }
+    ag: [['08:00', 'Aline', 'Bronze a jato', 150], ['10:30', 'Vanessa', 'Bronzeamento natural', 120]] },
+  depilacao: { cor: '#3bb0a0', ink: '#04201c', txt: 'espaços de depilação', neg: 'Depil da Lu', cli: 'Renata',
+    sv: [['Perna inteira', 70, 45], ['Virilha completa', 60, 40], ['Axilas', 25, 15]], pick: 0, hora: '10:00',
+    ag: [['08:30', 'Simone', 'Buço', 20], ['09:00', 'Carol', 'Virilha completa', 60]] },
+  maquiadora: { cor: '#c2477a', ink: '#2a0716', txt: 'maquiadoras', neg: 'Make by Bia', cli: 'Letícia',
+    sv: [['Maquiagem social', 150, 60], ['Madrinha / formatura', 180, 75], ['Maquiagem de noiva', 450, 120]], pick: 0, hora: '15:00',
+    ag: [['08:00', 'Camila', 'Maquiagem de noiva', 450], ['11:00', 'Júlia', 'Maquiagem express', 90]] }
 };
 const ORDEM = Object.keys(NICHOS);
 const HORAS = ['09:00', '10:30', '11:30', '14:00', '15:30', '16:00', '17:00', '13:00', '18:00'];
