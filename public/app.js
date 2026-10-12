@@ -367,7 +367,7 @@ function shell(title, actions, body) {
 function abrirAssinatura(plano) {
   if (!window.AgendaProAssinar) return toast('Não foi possível abrir o pagamento. Recarregue a página.');
   const as = ASSIN || PUB?.assinatura;
-  AgendaProAssinar.abrir({ plano, negocio: (S.config || PUB?.config || {}).negocio, slug: SLUG, login: me?.login, ajustado: as?.ajustado ? { valor: as.valor, pix: as.pix } : null });
+  AgendaProAssinar.abrir({ plano, negocio: (S.config || PUB?.config || {}).negocio, slug: SLUG, login: me?.login, ajustado: (as?.ajustado || as?.promo) && as.pix ? { valor: as.valor, pix: as.pix, promo: as.promo || null } : null });
 }
 function avisoVencimento() {
   if (me?.role !== 'admin' || !ASSIN?.vence) return '';
@@ -376,11 +376,11 @@ function avisoVencimento() {
     const valor = 'R$ ' + Number(ASSIN.valor || 39.9).toFixed(2).replace('.', ',');
     const link = `<button class="btn sm" style="background:#fff;color:#2a1640" onclick="abrirAssinatura()">Assinar agora</button>`;
     return `<div class="card" style="background:linear-gradient(120deg,#7a4fd6,#c0569a);color:#fff;border:0;margin-bottom:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-      <div style="flex:1;min-width:200px"><b>🎁 Teste grátis: ${dias <= 0 ? 'último dia hoje' : `faltam ${dias} dia(s)`}</b><div class="small" style="opacity:.9">Válido até ${fmtData(ASSIN.vence)}. Depois, ${valor}/mês para continuar.</div></div>${link}</div>`;
+      <div style="flex:1;min-width:200px"><b>🎁 Teste grátis: ${dias <= 0 ? 'último dia hoje' : `faltam ${dias} dia(s)`}</b><div class="small" style="opacity:.9">Válido até ${fmtData(ASSIN.vence)}. Depois, ${ASSIN.promo ? 'R$ 39,90' : valor}/mês para continuar.</div>${ASSIN.promo ? `<div class="small" style="margin-top:6px;background:rgba(0,0,0,.22);border-radius:10px;padding:6px 9px;font-weight:700">🔥 PROMOÇÃO: assine até ${fmtData(ASSIN.promo.ate)} e pague só ${valor}/mês por 6 meses (normal R$ 39,90)</div>` : ''}</div>${link}</div>`;
   }
   if (dias > 5) return '';
   const sup = ` <a href="#" style="color:#1a1300;text-decoration:underline" onclick="abrirAssinatura();return false">Renovar agora</a>`;
-  return `<div class="card" style="background:var(--warn);color:#1a1300;border:0;margin-bottom:14px;font-weight:700">⏳ Sua assinatura ${dias <= 0 ? 'vence hoje' : `vence em ${dias} dia(s)`} (${fmtData(ASSIN.vence)}) · ${ASSIN.ajustado ? 'plano ajustado ' : ''}${brl(ASSIN.valor || 39.9)}/mês.${sup}</div>`;
+  return `<div class="card" style="background:var(--warn);color:#1a1300;border:0;margin-bottom:14px;font-weight:700">⏳ Sua assinatura ${dias <= 0 ? 'vence hoje' : `vence em ${dias} dia(s)`} (${fmtData(ASSIN.vence)}) · ${ASSIN.ajustado ? 'plano ajustado ' : ASSIN.promo ? '🔥 promoção ' : ''}${brl(ASSIN.valor || 39.9)}/mês.${sup}</div>`;
 }
 
 function go(v, keepScroll) {
@@ -1203,8 +1203,8 @@ function vConfig() {
       </div>
       <div class="card" style="margin-top:12px"><h3>Assinatura</h3>
         <p class="small">${ASSIN?.vence ? `${ASSIN.trial ? 'Teste grátis' : 'Válida'} até <b>${fmtData(ASSIN.vence)}</b>` : 'Ativa'}</p>
-        <p class="small" style="margin-top:4px">${ASSIN?.ajustado ? `✨ <b>Plano ajustado</b>: ${brl(ASSIN.valor)}/mês (valor especial)` : `Plano mensal: ${brl(ASSIN?.valor || 39.9)}/mês`}</p>
-        <div class="acts" style="margin-top:10px"><button class="btn sm" onclick="abrirAssinatura()">💳 ${ASSIN?.trial ? 'Assinar' : 'Renovar'} com Pix</button>${ASSIN?.ajustado ? '' : `<button class="btn ghost sm" onclick="abrirAssinatura('anual')">Plano anual −${window.AgendaProAssinar ? AgendaProAssinar.desconto : 16}%</button>`}</div>
+        <p class="small" style="margin-top:4px">${ASSIN?.ajustado ? `✨ <b>Plano ajustado</b>: ${brl(ASSIN.valor)}/mês (valor especial)` : ASSIN?.promo ? `🔥 <b>Promoção</b>: ${brl(ASSIN.valor)}/mês por 6 meses${ASSIN.promo.fim ? ` (até ${fmtData(ASSIN.promo.fim)})` : ` para quem assinar até ${fmtData(ASSIN.promo.ate)}`}, depois R$ 39,90` : `Plano mensal: ${brl(ASSIN?.valor || 39.9)}/mês`}</p>
+        <div class="acts" style="margin-top:10px"><button class="btn sm" onclick="abrirAssinatura()">💳 ${ASSIN?.trial ? 'Assinar' : 'Renovar'} com Pix</button>${ASSIN?.ajustado || ASSIN?.promo ? '' : `<button class="btn ghost sm" onclick="abrirAssinatura('anual')">Plano anual −${window.AgendaProAssinar ? AgendaProAssinar.desconto : 16}%</button>`}</div>
         <p class="small" style="margin-top:8px">${PUB.suporte ? `<a style="color:var(--ac)" target="_blank" rel="noopener" href="https://wa.me/${PUB.suporte}">Falar com o suporte</a>` : ''}</p>
       </div>
       <div class="card" style="margin-top:12px"><h3>📲 Instalar o app</h3>

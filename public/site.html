@@ -235,6 +235,17 @@ section{padding-block:88px}
 .inc svg{width:20px;height:20px;flex:none;color:var(--ok);margin-top:2px}
 .preco{position:relative;border-radius:var(--r);padding:30px;background:linear-gradient(160deg,color-mix(in srgb,var(--ac) 26%,var(--panel)),var(--panel) 70%);border:1px solid color-mix(in srgb,var(--ac) 45%,var(--line));display:flex;flex-direction:column;gap:14px;overflow:hidden;transition:border-color .6s,background .6s}
 .preco .eyebrow{color:var(--text);opacity:.8}
+.promo-bar{display:none;background:linear-gradient(100deg,#ff5a36,#ff2d75);color:#fff;font:700 .9rem/1.3 var(--body);text-align:center;padding:8px 14px}
+.promo-bar.on{display:block}
+.promo-bar .w{max-width:1180px;margin:0 auto;display:flex;align-items:center;justify-content:center;gap:10px 14px;flex-wrap:wrap}
+.promo-bar b{font-weight:800}
+.promo-bar .cd{font-variant-numeric:tabular-nums;background:rgba(0,0,0,.22);border-radius:8px;padding:3px 8px;white-space:nowrap}
+.promo-bar .sm{display:none}
+@media (max-width:640px){.promo-bar{font-size:.78rem;padding:6px 10px}.promo-bar .w{gap:6px 8px}.promo-bar .lg{display:none}.promo-bar .sm{display:inline}.promo-bar .cd{padding:2px 6px}.promo-bar button{padding:4px 10px;font-size:.74rem}}
+.promo-bar button{background:#fff;color:#c4123f;border:0;border-radius:99px;padding:6px 14px;font:800 .82rem var(--body);cursor:pointer}
+.preco .ptag{display:none;align-self:flex-start;background:linear-gradient(90deg,#ff5a36,#ff2d75);color:#fff;font-size:.75rem;font-weight:800;border-radius:99px;padding:4px 10px;letter-spacing:.02em;margin-bottom:6px}
+.preco.promo .ptag{display:inline-block}
+.preco.promo{border-color:#ff6a3d}
 .preco .val{font-family:var(--display);font-size:clamp(2.2rem,4vw,3rem);line-height:1}
 .preco .val small{font-family:var(--body);font-size:1rem;color:var(--mut);font-weight:600}
 .preco p{color:var(--mut);font-size:.95rem}
@@ -365,6 +376,12 @@ footer a{color:var(--text);font-weight:700}
 <body>
 
 <header class="top">
+  <div class="promo-bar" id="promoBar" role="region" aria-label="Promoção"><div class="w">
+    <span class="lg">🔥 <b>PROMOÇÃO DE LANÇAMENTO:</b> assine até <b>16/10</b> e pague <b>R$ 19,99/mês por 6 meses</b></span>
+    <span class="sm">🔥 <b>R$ 19,99/mês</b> por 6 meses · só até 16/10</span>
+    <span class="cd" id="promoCd" aria-live="off"></span>
+    <button type="button" id="promoBtn">Garantir agora</button>
+  </div></div>
   <div class="wrap">
     <a class="logo" href="#inicio" aria-label="AgendaPro, início">
       <i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M8 3v4M16 3v4M8 13l3 3 5-6"/></svg></i>
@@ -711,6 +728,7 @@ footer a{color:var(--text);font-weight:700}
           </ul>
         </div>
         <div class="preco rv d1">
+          <span class="ptag">🔥 Promoção só até 16/10</span>
           <div class="eyebrow">Plano completo</div>
           <div class="ciclo" role="group" aria-label="Escolher período">
             <button type="button" data-ciclo="mensal" aria-pressed="true">Mensal</button>
@@ -741,7 +759,7 @@ footer a{color:var(--text);font-weight:700}
         <details class="rv"><summary>Tenho mais de um profissional. Funciona?</summary><div class="a">Funciona. Cada profissional tem a própria agenda e o cliente escolhe com quem quer ser atendido na hora de marcar.</div></details>
         <details class="rv"><summary>Meus dados ficam seguros?</summary><div class="a">As senhas são guardadas criptografadas e os dados de cada negócio ficam separados. Você também pode baixar um backup completo quando quiser.</div></details>
         <details class="rv"><summary>Como funciona o teste grátis?</summary><div class="a">Você preenche o formulário e já entra no painel, com tudo liberado por 3 dias. Não pedimos cartão. Se quiser continuar, assina por R$ 39,90/mês (ou R$ 399,90 no plano anual) pagando por Pix, e tudo o que você cadastrou continua lá. Se não assinar, o acesso fica pausado.</div></details>
-        <details class="rv"><summary>Como eu pago?</summary><div class="a">Por Pix. Toque em <b>Assinar agora</b>, escolha mensal (R$ 39,90) ou anual (R$ 399,90, 16% de desconto), pague pelo QR Code ou pelo código copia e cola e toque em <b>Já paguei</b> para enviar o comprovante no WhatsApp. O acesso é liberado assim que o pagamento é confirmado.</div></details>
+        <details class="rv"><summary>Como eu pago?</summary><div class="a">Por Pix. Toque em <b>Assinar agora</b>, escolha mensal (R$ 39,90 — ou <b>R$ 19,99 por 6 meses</b> para quem assinar até 16/10) ou anual (R$ 399,90, 16% de desconto), pague pelo QR Code ou pelo código copia e cola e toque em <b>Já paguei</b> para enviar o comprovante no WhatsApp. O acesso é liberado assim que o pagamento é confirmado.</div></details>
         <details class="rv"><summary>Meus funcionários podem usar?</summary><div class="a">Sim. Você cadastra cada funcionário com usuário e senha próprios. Ele vê só a agenda dele e recebe aviso dos clientes dele. Financeiro e estoque ficam só com você.</div></details>
         <details class="rv"><summary>Como eu recebo o acesso?</summary><div class="a">Na hora, pelo teste grátis aqui no site. Se preferir, chame no WhatsApp que eu crio o acesso com você.</div></details>
       </div>
@@ -785,6 +803,7 @@ footer a{color:var(--text);font-weight:700}
   <span>Fale comigo</span>
 </a>
 
+<script src="/qrcode.js"></script>
 <script src="/assinar.js"></script>
 <script>
 /* ===== Ajuste aqui ===== */
@@ -803,16 +822,32 @@ document.querySelectorAll('[data-wa]').forEach(a => {
 });
 /* Plano: mensal ou anual (promoção) + pagamento por Pix */
 let ciclo = 'mensal';
+/* 🔥 Promoção: R$ 19,99/mês por 6 meses para quem assinar até 16/10 (some sozinha depois) */
+const PROMO_FIM = Date.parse('2026-10-17T00:00:00-03:00');
+const promoOn = () => Date.now() < PROMO_FIM;
+function relogioPromo() {
+  const bar = $('#promoBar'), ms = PROMO_FIM - Date.now();
+  if (ms <= 0) { bar.classList.remove('on'); clearInterval(window._promoT); if (window._promoT) mostraCiclo(ciclo); return; }
+  bar.classList.add('on');
+  const d = Math.floor(ms / 864e5), h = Math.floor(ms / 36e5) % 24, m = Math.floor(ms / 6e4) % 60, sg = Math.floor(ms / 1e3) % 60, p = n => String(n).padStart(2, '0');
+  $('#promoCd').textContent = `⏰ ${innerWidth > 640 ? 'termina em ' : ''}${d ? d + 'd ' : ''}${p(h)}h ${p(m)}m ${p(sg)}s`;
+}
+relogioPromo(); if (promoOn()) window._promoT = setInterval(relogioPromo, 1000);
+$('#promoBtn').addEventListener('click', () => window.AgendaProAssinar && AgendaProAssinar.abrir({ plano: 'mensal', cadastro: true }));
 function mostraCiclo(c) {
   ciclo = c;
   document.querySelectorAll('[data-ciclo]').forEach(b => b.setAttribute('aria-pressed', b.dataset.ciclo === c));
   if (c === 'anual') {
     $('#preco').innerHTML = `<span class="de">R$ 478,80</span><small>R$</small> 399,90 <small>/ano</small>`;
     $('#precoTxt').innerHTML = `Sai por <b>R$ 33,32/mês</b>, pago uma vez por ano.<br><span class="eco">Você economiza R$ 78,90 (16%)</span>`;
+  } else if (promoOn()) {
+    $('#preco').innerHTML = `<span class="de">R$ 39,90</span><small>R$</small> 19,99 <small>/mês</small>`;
+    $('#precoTxt').innerHTML = `<b>Por 6 meses</b> para quem assinar até <b>16/10</b>. Depois volta para R$ 39,90/mês.<br><span class="eco">Você economiza R$ 119,46 no semestre</span>`;
   } else {
     $('#preco').innerHTML = `<small>R$</small> ${CONFIG.preco || '39,90'} <small>/mês</small>`;
     $('#precoTxt').textContent = 'Renova a cada 30 dias. Cancele quando quiser.';
   }
+  document.querySelector('.preco').classList.toggle('promo', promoOn());
 }
 document.querySelectorAll('[data-ciclo]').forEach(b => b.addEventListener('click', () => mostraCiclo(b.dataset.ciclo)));
 $('#btnAssinar').addEventListener('click', () => window.AgendaProAssinar && AgendaProAssinar.abrir({ plano: ciclo, cadastro: true }));

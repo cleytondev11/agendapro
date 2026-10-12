@@ -262,7 +262,7 @@ function verificarVencimentos() {
     if (m.vence === amanha && m.avisos.v1 !== m.vence) {
       m.avisos.v1 = m.vence; salvar(E);
       evento('vence', `⏳ ${nome}: vence amanhã`, `${oque} termina em ${fmtData(m.vence)}. Hora de chamar no WhatsApp.`, m.slug);
-      pushAdmins(E, m.trial ? '⏳ Seu teste grátis termina amanhã' : '⏳ Sua assinatura vence amanhã', `Renove para continuar usando o AgendaPro. Valor: R$ ${valorPlano(E).toFixed(2).replace('.', ',')}/mês${ehAjustado(E) ? ' (plano ajustado)' : ''}.`);
+      pushAdmins(E, m.trial ? '⏳ Seu teste grátis termina amanhã' : '⏳ Sua assinatura vence amanhã', `Renove para continuar usando o AgendaPro. Valor: R$ ${valorPlano(E).toFixed(2).replace('.', ',')}/mês${ehAjustado(E) ? ' (plano ajustado)' : emPromo(E) ? ' (🔥 promoção)' : ''}.`);
     }
     if (hoje > m.vence && m.avisos.v0 !== m.vence) {
       m.avisos.v0 = m.vence; salvar(E);
@@ -382,13 +382,23 @@ const comPix = (E, a) => { const pix = pixDoAgendamento(E, a); return pix ? { ..
 
 /* ----- plano ajustado (valor especial definido na Central) ----- */
 const PIX_ASSIN = { chave: process.env.PIX_CHAVE || '7e158db6-1929-40ae-86d0-7484c64a9c84', nome: process.env.PIX_NOME || 'Cleyton de Souza Santos', cidade: process.env.PIX_CIDADE || 'SAO PAULO' };
-const valorPlano = E => Number(E.meta.valor) > 0 ? Number(E.meta.valor) : VALOR_PADRAO;
 const ehAjustado = E => Number(E.meta.valor) > 0 && Math.abs(Number(E.meta.valor) - VALOR_PADRAO) > 0.004;
+/* ----- promoção de lançamento: quem assinar até PROMO.ate paga PROMO.valor por PROMO.dias ----- */
+const PROMO = { ate: process.env.PROMO_ATE || '2026-10-16', valor: Number(process.env.PROMO_VALOR) || 19.99, dias: 180 };
+const promoAberta = () => hojeSP() <= PROMO.ate;
+// garantida: já assinou dentro do prazo (vale até promo.fim); oferta: teste grátis ainda pode garantir
+const promoGarantida = E => !!E.meta.promo && (!E.meta.promo.fim || (E.meta.vence || hojeSP()) < E.meta.promo.fim);
+const promoOferta = E => !E.meta.promo && !!E.meta.trial && promoAberta();
+const emPromo = E => !ehAjustado(E) && (promoGarantida(E) || promoOferta(E));
+function garantirPromo(E) { if (!E.meta.promo && !ehAjustado(E) && promoAberta()) E.meta.promo = { valor: PROMO.valor, em: new Date().toISOString() }; }
+const valorPlano = E => ehAjustado(E) ? Number(E.meta.valor) : emPromo(E) ? Number(E.meta.promo?.valor || PROMO.valor) : VALOR_PADRAO;
 function assinaturaInfo(E) {
-  const v = valorPlano(E), aj = ehAjustado(E);
+  const v = valorPlano(E), aj = ehAjustado(E), pr = emPromo(E);
   return { vence: E.meta.vence || '', trial: !!E.meta.trial, valor: v, ajustado: aj,
-    pix: aj ? brCode(PIX_ASSIN.chave, PIX_ASSIN.nome, PIX_ASSIN.cidade, v, 'AJ' + E.meta.slug.replace(/[^a-z0-9]/gi, '').slice(0, 20)) : '' };
+    promo: pr ? { ate: PROMO.ate, fim: E.meta.promo?.fim || '', garantida: promoGarantida(E) } : null,
+    pix: aj || pr ? brCode(PIX_ASSIN.chave, PIX_ASSIN.nome, PIX_ASSIN.cidade, v, (pr ? 'PR' : 'AJ') + E.meta.slug.replace(/[^a-z0-9]/gi, '').slice(0, 20)) : '' };
 }
+route('GET', '/api/promo', null, () => ({ aberta: promoAberta(), ate: PROMO.ate, valor: PROMO.valor, dias: PROMO.dias, padrao: VALOR_PADRAO }));
 
 /* ----- empresa: público ----- */
 route('GET', T + '/public', 'empresa', req => {
@@ -722,7 +732,7 @@ function resumo(E) {
   return {
     slug: E.meta.slug, negocio: E.config.negocio, nicho: E.config.nicho,
     dono: dono?.nome || '', login: dono?.login || '', donoTel: E.meta.donoTel || '',
-    criado: E.meta.criado, vence: E.meta.vence || '', valor: valorPlano(E), ajustado: ehAjustado(E), obs: E.meta.obs || '',
+    criado: E.meta.criado, vence: E.meta.vence || '', valor: valorPlano(E), ajustado: ehAjustado(E), promo: E.meta.promo || null, emPromo: emPromo(E), promoOferta: promoOferta(E), obs: E.meta.obs || '',
     bloqueado: !!E.meta.bloqueado, situacao: situacao(E),
     clientes: E.users.filter(u => u.role === 'cliente').length,
     agMes: E.agendamentos.filter(a => (a.data || '').startsWith(mes) && a.status !== 'cancelado' && a.status !== 'bloqueio').length,
@@ -735,6 +745,7 @@ function resumo(E) {
 }
 /* ----- modelos de mensagem da Central (boas-vindas e acompanhamento do teste) ----- */
 const MODELOS_PADRAO = {
+  promo: { nome: '🔥 Promoção 19,99', texto: `Oi, {nome}! Tudo bem? 😊\n\n🔥 *PROMOÇÃO DE LANÇAMENTO DO AGENDAPRO* 🔥\n\nQuem assinar até *16/10* paga só *R$ 19,99/mês durante 6 meses* (o normal é R$ 39,90). Depois volta ao valor normal.\n\nA *{negocio}* já está com tudo configurado, é só continuar usando sem parar:\n✅ Agenda online 24h para seus clientes\n✅ Lembretes e notificações no celular\n✅ Sinal por Pix para evitar faltas\n\n👉 Para garantir: entre no painel ({link}), toque em *Assinar agora* e pague o Pix de R$ 19,99. Depois é só me mandar o comprovante aqui.\n\n⏰ Válido só até 16/10!` },
   boasvindas: { nome: '👋 Boas-vindas', texto: `Olá, {nome}! Seja muito bem-vindo(a) ao AgendaPro Beleza! 🎉\n\nSeu teste grátis da *{negocio}* já está liberado até *{vence}*.\n\n🔗 Seu painel: {link}\n👤 Usuário: {usuario}\n\nPara começar com o pé direito:\n1️⃣ Ajustes → Dados da empresa: coloque sua logo e endereço\n2️⃣ Serviços: confira seus preços e tempos\n3️⃣ Ajustes → Pix e sinal: cadastre sua chave para cobrar o sinal\n4️⃣ Instalar app: deixe o AgendaPro na tela do seu celular\n5️⃣ Mande seu link para os clientes agendarem sozinhos 🚀\n\nQualquer dúvida, é só me chamar aqui. Estou à disposição para te ajudar a configurar! 😉` },
   acompanhamento: { nome: '🤝 Como está indo? (2º dia)', texto: `Oi, {nome}! Tudo bem? 😊\n\nPassando para saber como está sendo o teste do AgendaPro na *{negocio}*. Conseguiu configurar seus serviços e mandar o link para algum cliente?\n\nSe quiser, faço uma chamada rápida e te ajudo a deixar tudo pronto. 😉\n\n🔗 {link}` },
   ultimodia: { nome: '⏳ Último dia do teste', texto: `Oi, {nome}! Seu teste grátis do AgendaPro termina em *{vence}*. ⏳\n\nPara continuar com sua agenda, clientes e configurações, é só assinar por *{valor}/mês* (sem fidelidade). No painel, toque em *Assinar agora* e pague com Pix.\n\n🔗 {link}\n\nQualquer dúvida, me chama! 💜` },
@@ -790,10 +801,12 @@ route('POST', '/api/pagamento-informado', null, (req, b) => {
   if (lst.length >= 5) return { ok: true };
   avisosPg.set(req.ip, [...lst, Date.now()]);
   const E = EMP[str(b.slug, 60)], anual = b.plano === 'anual', ajust = b.plano === 'ajustado' && E && ehAjustado(E);
+  const promo = b.plano === 'promo' && (promoAberta() || (!!E && promoGarantida(E)));
+  if (E && promo) garantirPromo(E);
   const nome = E ? E.config.negocio : (str(b.negocio, 80) || 'Visitante do site');
-  const txt = ajust ? `ajustado · R$ ${valorPlano(E).toFixed(2).replace('.', ',')}` : anual ? 'anual · R$ 399,90' : 'mensal · R$ 39,90';
+  const txt = ajust ? `ajustado · R$ ${valorPlano(E).toFixed(2).replace('.', ',')}` : promo ? `🔥 PROMOÇÃO · R$ ${(E ? valorPlano(E) : PROMO.valor).toFixed(2).replace('.', ',')}/mês (6 meses)` : anual ? 'anual · R$ 399,90' : 'mensal · R$ 39,90';
   evento('pago', `💰 Pagamento informado: ${nome}`, `Plano ${txt}. Confira o comprovante no WhatsApp e libere em "${E?.meta.trial ? 'Ativar plano' : 'Renovar'}" (${anual ? '365' : '30'} dias).`, E ? E.meta.slug : '');
-  if (E) { E.meta.pagInformado = { plano: ajust ? 'ajustado' : anual ? 'anual' : 'mensal', em: new Date().toISOString() }; delete E.meta.pagPendente; salvar(E); }
+  if (E) { E.meta.pagInformado = { plano: ajust ? 'ajustado' : promo ? 'promo' : anual ? 'anual' : 'mensal', em: new Date().toISOString() }; delete E.meta.pagPendente; salvar(E); }
   return { ok: true };
 });
 
@@ -809,11 +822,11 @@ route('POST', '/api/teste', null, async (req, b) => {
   if (String(b.senha || '').length < 6) fail(400, 'Crie uma senha com pelo menos 6 caracteres.');
   const tel = whats.replace(/^55(?=\d{10,11}$)/, '');
   const ja = Object.values(EMP).find(E => E.meta.email === email || digits(E.meta.donoTel).replace(/^55(?=\d{10,11}$)/, '') === tel || E.users.some(u => u.role === 'admin' && u.login === email));
-  const assinar = ['mensal', 'anual'].includes(b.assinar) ? b.assinar : '';
+  const assinar = ['mensal', 'anual', 'promo'].includes(b.assinar) ? b.assinar : '';
   if (assinar && ja) { // já tem conta e quer assinar: se a senha confere, segue para o pagamento dessa conta
     const dono = ja.users.find(u => u.role === 'admin');
     if (dono && dono.login === email && checkPw(b.senha, dono.senha)) {
-      ja.meta.pagPendente = { plano: assinar, em: new Date().toISOString() };
+      ja.meta.pagPendente = { plano: assinar, em: new Date().toISOString() }; if (assinar === 'promo') garantirPromo(ja);
       const token = novaSessao(ja.sessions, dono.id); salvar(ja);
       evento('assinatura', `🛒 Quer assinar: ${ja.config.negocio}`, `Plano ${assinar}. Conta já existente (${email}). Aguardando o Pix.`, ja.meta.slug);
       return { slug: ja.meta.slug, token, login: email, vence: ja.meta.vence, existente: true };
@@ -826,6 +839,7 @@ route('POST', '/api/teste', null, async (req, b) => {
   cadastrosIp.set(req.ip, [...recentes, Date.now()]);
   const vence = somaDias(hojeSP(), DIAS_TESTE);
   const E = await criarEmpresa({ negocio: loja, nicho, login: email, senha: b.senha, dono: nome, donoTel: str(b.whatsapp, 30), email, vence, valor: VALOR_PADRAO, trial: true, obs: assinar ? `Assinatura pelo site (plano ${assinar}) · aguardando Pix` : 'Teste grátis pelo site' }, { origem: 'site', ...(assinar ? { pagPendente: { plano: assinar, em: new Date().toISOString() } } : {}) });
+  if (assinar === 'promo') { garantirPromo(E); salvar(E); }
   META.testesUsados.push(email, tel); marcar('meta');
   const dono = E.users.find(u => u.role === 'admin');
   const token = novaSessao(E.sessions, dono.id); salvar(E);
@@ -878,6 +892,10 @@ route('PUT', '/api/central/empresas/:slug', 'central', async (req, b, p) => {
 route('POST', '/api/central/empresas/:slug/renovar', 'central', async (req, b, p) => {
   const E = empCentral(p.slug), dias = Math.min(Math.max(parseInt(b.dias) || 30, 1), 3660);
   const base = E.meta.vence && E.meta.vence > hojeSP() ? E.meta.vence : hojeSP();
+  if (b.promo === true && !E.meta.promo && !ehAjustado(E)) E.meta.promo = { valor: PROMO.valor, em: new Date().toISOString() };
+  else if (b.promo === false && E.meta.promo && !E.meta.promo.fim) delete E.meta.promo;
+  else if (b.promo === undefined && promoOferta(E)) garantirPromo(E);
+  if (E.meta.promo && !E.meta.promo.fim) E.meta.promo.fim = somaDias(base, PROMO.dias); // 6 meses a partir do 1º período pago
   E.meta.vence = somaDias(base, dias); E.meta.bloqueado = false; E.meta.trial = false; E.meta.avisos = {}; delete E.meta.pagInformado; delete E.meta.pagPendente;
   changed(E); if (!(await gravarAgora())) fail(503, ERRO_BANCO);
   return { empresa: resumo(E) };

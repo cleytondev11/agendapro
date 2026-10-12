@@ -114,7 +114,7 @@ function render() {
       return `<div class="emp">
         <div class="ic" style="background:${e.temLogo ? 'transparent' : `color-mix(in srgb,${n.cor} 25%,transparent)`}">${e.temLogo ? `<img src="/m/${e.slug}.logo" alt="" style="width:100%;height:100%;object-fit:contain;border-radius:10px">` : n.icon || '✨'}</div>
         <div style="min-width:0">
-          <div class="t">${esc(e.negocio)} <span class="pill ${st}">${STATUS_TXT[st]}</span>${e.ajustado ? ` <span class="pill" style="background:color-mix(in srgb,#ffc35a 22%,transparent);color:#ffc35a">✨ Plano ajustado</span>` : ''}${e.trial ? ((e.msgs || {}).boasvindas ? ` <span class="pill" style="background:color-mix(in srgb,#3fbf8a 18%,transparent);color:#6fe0ad" title="Enviada em ${new Date(e.msgs.boasvindas).toLocaleString('pt-BR')}">✅ boas-vindas</span>` : ` <span class="pill" style="background:color-mix(in srgb,#ff8fb8 20%,transparent);color:#ff9cc0">👋 enviar boas-vindas</span>`) : ''}${e.pagInformado ? ` <span class="pill" style="background:color-mix(in srgb,#25d366 22%,transparent);color:#4ee38a">💰 informou Pix ${e.pagInformado.plano}</span>` : e.pagPendente ? ` <span class="pill" style="background:color-mix(in srgb,#f0b54a 22%,transparent);color:#f0b54a">🛒 assinou pelo site (${e.pagPendente.plano}) · aguardando Pix</span>` : ''}</div>
+          <div class="t">${esc(e.negocio)} <span class="pill ${st}">${STATUS_TXT[st]}</span>${e.ajustado ? ` <span class="pill" style="background:color-mix(in srgb,#ffc35a 22%,transparent);color:#ffc35a">✨ Plano ajustado</span>` : ''}${promoPill(e)}${e.trial ? ((e.msgs || {}).boasvindas ? ` <span class="pill" style="background:color-mix(in srgb,#3fbf8a 18%,transparent);color:#6fe0ad" title="Enviada em ${new Date(e.msgs.boasvindas).toLocaleString('pt-BR')}">✅ boas-vindas</span>` : ` <span class="pill" style="background:color-mix(in srgb,#ff8fb8 20%,transparent);color:#ff9cc0">👋 enviar boas-vindas</span>`) : ''}${e.pagInformado ? ` <span class="pill" style="background:color-mix(in srgb,#25d366 22%,transparent);color:#4ee38a">💰 informou Pix ${e.pagInformado.plano}</span>` : e.pagPendente ? ` <span class="pill" style="background:color-mix(in srgb,#f0b54a 22%,transparent);color:#f0b54a">🛒 assinou pelo site (${e.pagPendente.plano}) · aguardando Pix</span>` : ''}</div>
           <div class="d">${n.label || ''} · <a href="${linkEmp(e.slug)}" target="_blank" rel="noopener">/${esc(e.slug)}</a> · usuário <b>${esc(e.login)}</b>${e.dono ? ' · ' + esc(e.dono) : ''}${e.donoTel ? ' · ' + esc(e.donoTel) : ''}${e.email && e.email !== e.login ? ' · ' + esc(e.email) : ''}${e.cnpj ? ' · CNPJ ' + esc(e.cnpj) : ''}${e.origem === 'site' ? ' · <span style="color:#b48cff">via site</span>' : ''}<br>
             ${e.vence ? `vence ${fmtData(e.vence)}${e.situacao === 'ativa' ? ` (${diasAte(e.vence)} dias)` : ''}` : 'sem vencimento'} · ${brl(e.valor)}/mês · ${e.clientes} clientes · ${e.funcionarios ? e.funcionarios + ' funcionário(s) · ' : ''}${e.agMes} agend. no mês · ${e.aparelhosPush ? `🔔 ${e.aparelhosPush} aparelho(s)` : '🔕 sem notificação'}${e.obs ? ' · ' + esc(e.obs) : ''}</div>
         </div>
@@ -162,7 +162,7 @@ function formEmpresa(slug) {
     <div class="row">
       <div><label>Vencimento <span class="mut">(vazio = sem vencimento)</span></label><input type="date" name="vence" id="fVence" value="${venc}">
         <div class="tabs-f" style="margin-top:6px"><button type="button" onclick="$('#fVence').value=addDias(DADOS.hoje,3);$('#fTrial').checked=true">Teste 3 dias</button><button type="button" onclick="$('#fVence').value=addDias(DADOS.hoje,30);$('#fTrial').checked=false">30 dias</button><button type="button" onclick="$('#fVence').value=addDias(DADOS.hoje,365);$('#fTrial').checked=false">1 ano</button></div></div>
-      <div><label>Valor mensal (R$) <span class="mut">(diferente de 39,90 = plano ajustado)</span></label><input name="valor" inputmode="decimal" value="${e ? String(Number(e.valor).toFixed(2)).replace('.', ',') : '39,90'}" placeholder="Ex.: 39,90"></div>
+      <div><label>Valor mensal (R$) <span class="mut">(diferente de 39,90 = plano ajustado)</span></label><input name="valor" inputmode="decimal" value="${e && e.ajustado ? String(Number(e.valor).toFixed(2)).replace('.', ',') : '39,90'}" placeholder="Ex.: 39,90">${e && e.emPromo ? `<span class="small" style="color:#ff9a6b">🔥 Em promoção: paga ${brl(e.valor)}/mês. Deixe 39,90 para manter a promoção.</span>` : ''}</div>
     </div>
     <label>E-mail <span class="mut">(opcional)</span></label><input name="email" type="email" value="${esc(e?.email || '')}">
     <label>Observação</label><input name="obs" value="${esc(e?.obs || '')}" placeholder="Ex.: pago via Pix, plano anual…">
@@ -230,12 +230,13 @@ function renovar(slug) {
     <p class="mut">${esc(e.negocio)} · ${e.vence ? 'vence ' + fmtData(e.vence) : 'sem vencimento'}</p>
     <label>Adicionar</label>
     ${e.ajustado ? `<p class="small" style="margin:4px 0 8px;color:#ffc35a">✨ Plano ajustado: <b>${brl(e.valor)}/mês</b></p>` : ''}
-    <select name="dias">${[[30, e.ajustado ? `30 dias (plano ajustado · ${brl(e.valor)})` : '30 dias (mensal · R$ 39,90)'], [90, `90 dias (trimestral${e.ajustado ? ' · ' + brl(e.valor * 3) : ''})`], [180, `180 dias (semestral${e.ajustado ? ' · ' + brl(e.valor * 6) : ''})`], [365, e.ajustado ? `365 dias (anual · ${brl(e.valor * 12)})` : '365 dias (anual · R$ 399,90)']].map(([d, t]) => `<option value="${d}" ${(e.pagInformado?.plano || e.pagPendente?.plano) === 'anual' ? (d === 365 ? 'selected' : '') : (d === 30 ? 'selected' : '')}>${t}</option>`).join('')}</select>
-    ${e.pagInformado ? `<p class="small" style="margin-top:8px;color:#4ee38a">💰 Informou pagamento do plano ${e.pagInformado.plano} em ${new Date(e.pagInformado.em).toLocaleString('pt-BR')}. Confira o comprovante no WhatsApp antes de liberar.</p>` : ''}
+    ${!e.ajustado && (e.emPromo || e.promo) ? `<label class="small" style="display:flex;gap:8px;align-items:center;margin:4px 0 8px;color:#ff9a6b;font-weight:700"><input type="checkbox" name="promo" checked style="width:auto"> 🔥 Promoção: ${brl(e.promo?.valor || e.valor)}/mês por 6 meses${e.promo?.fim ? ` (até ${fmtData(e.promo.fim)})` : ''}, depois volta a R$ 39,90</label>` : ''}
+    <select name="dias">${[[30, e.ajustado ? `30 dias (plano ajustado · ${brl(e.valor)})` : e.emPromo ? `30 dias (🔥 promoção · ${brl(e.valor)})` : '30 dias (mensal · R$ 39,90)'], [90, `90 dias (trimestral${e.ajustado ? ' · ' + brl(e.valor * 3) : ''})`], [180, `180 dias (semestral${e.ajustado ? ' · ' + brl(e.valor * 6) : ''})`], [365, e.ajustado ? `365 dias (anual · ${brl(e.valor * 12)})` : '365 dias (anual · R$ 399,90)']].map(([d, t]) => `<option value="${d}" ${(e.pagInformado?.plano || e.pagPendente?.plano) === 'anual' ? (d === 365 ? 'selected' : '') : (d === 30 ? 'selected' : '')}>${t}</option>`).join('')}</select>
+    ${e.pagInformado ? `<p class="small" style="margin-top:8px;color:#4ee38a">💰 Informou pagamento do plano ${e.pagInformado.plano === 'promo' ? '🔥 promoção (R$ 19,99)' : e.pagInformado.plano} em ${new Date(e.pagInformado.em).toLocaleString('pt-BR')}. Confira o comprovante no WhatsApp antes de liberar.</p>` : ''}
     <p class="mut small" style="margin-top:8px">Se ainda estiver em dia, os dias são somados ao vencimento atual. Se estiver vencido ou bloqueado, conta a partir de hoje e o acesso é liberado.</p>
     ${foot('Renovar')}
-  </form>`, async f => {
-    const r = await api('POST', `/api/central/empresas/${slug}/renovar`, { dias: f.dias });
+  </form>`, async (f, form) => {
+    const r = await api('POST', `/api/central/empresas/${slug}/renovar`, { dias: f.dias, ...(form.querySelector('[name=promo]') ? { promo: f.promo === 'on' } : {}) });
     toast('Renovado até ' + fmtData(r.empresa.vence)); carregar();
   });
 }
@@ -250,9 +251,17 @@ function preencher(txt, e) {
   return txt.replace(/\{nome\}/g, nome).replace(/\{negocio\}/g, e.negocio).replace(/\{link\}/g, linkEmp(e.slug))
     .replace(/\{usuario\}/g, e.login).replace(/\{vence\}/g, e.vence ? fmtData(e.vence) : 'sem vencimento').replace(/\{valor\}/g, brl(e.valor));
 }
+const PROMO_PILL = 'background:color-mix(in srgb,#ff6a3d 22%,transparent);color:#ff9a6b';
+function promoPill(e) {
+  if (!e.emPromo) return '';
+  if (e.promo?.fim) return ` <span class="pill" style="${PROMO_PILL}" title="R$ ${brl(e.valor)}/mês até ${fmtData(e.promo.fim)}, depois volta para R$ 39,90">🔥 Promo ${brl(e.valor)} até ${fmtData(e.promo.fim)}</span>`;
+  if (e.promo) return ` <span class="pill" style="${PROMO_PILL}">🔥 Promo garantida · ativar</span>`;
+  return ` <span class="pill" style="${PROMO_PILL}" title="Se assinar até 16/10 paga ${brl(e.valor)}/mês por 6 meses">🔥 pode pegar a promo</span>`;
+}
 function modeloSugerido(e) {
   const m = e.msgs || {};
   if (e.trial && !m.boasvindas) return 'boasvindas';
+  if (e.promoOferta && !m.promo) return 'promo';
   if (e.situacao === 'vencida') return 'encerrado';
   if (e.trial && e.vence && diasAte(e.vence) <= 1) return 'ultimodia';
   return 'acompanhamento';
@@ -310,7 +319,7 @@ const VALOR_PADRAO = 39.9;
 function ajustarValor(slug) {
   const e = DADOS.empresas.find(x => x.slug === slug);
   openModal('💲 Valor da mensalidade', `<form>
-    <p class="mut">${esc(e.negocio)} · hoje: <b>${brl(e.valor)}/mês</b>${e.ajustado ? ' (plano ajustado)' : ' (padrão)'}</p>
+    <p class="mut">${esc(e.negocio)} · hoje: <b>${brl(e.valor)}/mês</b>${e.ajustado ? ' (plano ajustado)' : e.emPromo ? ' (🔥 promoção)' : ' (padrão)'}</p>
     <label>Novo valor mensal (R$)</label>
     <input name="valor" id="fValor" inputmode="decimal" required value="${String(e.valor.toFixed(2)).replace('.', ',')}" placeholder="Ex.: 39,90">
     <div class="tabs-f" style="margin-top:8px">${[19.9, 24.9, 29.9, 34.9].map(v => `<button type="button" onclick="$('#fValor').value='${v.toFixed(2).replace('.', ',')}';prevAjuste()">${brl(v)}</button>`).join('')}<button type="button" onclick="$('#fValor').value='39,90';prevAjuste()">Padrão</button></div>
