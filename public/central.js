@@ -87,7 +87,9 @@ function render() {
   const receita = ativas.reduce((s, e) => s + e.valor, 0);
   const cont = k => E.filter(e => status(e) === k).length;
   const q = ui.busca.toLowerCase();
-  const lista = E.filter(e => (ui.filtro === 'todas' || status(e) === ui.filtro || (ui.filtro === 'teste' && e.trial)) && (!q || [e.negocio, e.slug, e.login, e.dono, e.donoTel, e.email].join(' ').toLowerCase().includes(q)));
+  const precisaBV = e => e.trial && !(e.msgs || {}).boasvindas;
+  const semBV = E.filter(precisaBV).length;
+  const lista = E.filter(e => (ui.filtro === 'todas' || status(e) === ui.filtro || (ui.filtro === 'teste' && e.trial) || (ui.filtro === 'semmsg' && precisaBV(e))) && (!q || [e.negocio, e.slug, e.login, e.dono, e.donoTel, e.email].join(' ').toLowerCase().includes(q)));
   const pagantes = ativas.filter(e => !e.trial);
   $('#app').innerHTML = `
   <main class="main" style="max-width:1100px;margin:0 auto">
@@ -103,7 +105,8 @@ function render() {
     ${avisoBanco()}
     ${!DADOS.aparelhosCentral && 'PushManager' in window ? `<div class="card" style="margin-top:12px;border-color:var(--ac);display:flex;gap:12px;align-items:center;flex-wrap:wrap"><div style="flex:1;min-width:200px"><b>🔔 Ative as notificações da Central</b><div class="mut small">Receba no celular cada teste grátis novo feito pelo site e os avisos de vencimento.</div></div><button class="btn sm" onclick="ativarPushCentral()">Ativar neste aparelho</button></div>` : ''}
     <div class="filters" style="margin-top:16px">
-      <div class="tabs-f">${['todas', 'ativa', 'teste', 'avencer', 'vencida', 'bloqueada'].map(k => `<button class="${ui.filtro === k ? 'on' : ''}" onclick="ui.filtro='${k}';render()">${k === 'todas' ? 'Todas' : STATUS_TXT[k]}</button>`).join('')}</div>
+      <div class="tabs-f">${['todas', 'ativa', 'teste', 'avencer', 'vencida', 'bloqueada'].map(k => `<button class="${ui.filtro === k ? 'on' : ''}" onclick="ui.filtro='${k}';render()">${k === 'todas' ? 'Todas' : STATUS_TXT[k]}</button>`).join('')}<button class="${ui.filtro === 'semmsg' ? 'on' : ''}" onclick="ui.filtro='semmsg';render()">👋 Sem boas-vindas${semBV ? ` (${semBV})` : ''}</button></div>
+      <button class="btn ghost sm" onclick="editarModelos()">✏️ Modelos de mensagem</button>
       <input placeholder="Buscar nome, link, usuário, telefone…" value="${esc(ui.busca)}" style="flex:1;min-width:200px" oninput="ui.busca=this.value;clearTimeout(window._b);window._b=setTimeout(()=>{render();const i=document.querySelector('.filters input');i.focus();i.setSelectionRange(99,99)},250)">
     </div>
     <div class="card">${lista.length ? lista.map(e => {
@@ -111,12 +114,13 @@ function render() {
       return `<div class="emp">
         <div class="ic" style="background:${e.temLogo ? 'transparent' : `color-mix(in srgb,${n.cor} 25%,transparent)`}">${e.temLogo ? `<img src="/m/${e.slug}.logo" alt="" style="width:100%;height:100%;object-fit:contain;border-radius:10px">` : n.icon || '✨'}</div>
         <div style="min-width:0">
-          <div class="t">${esc(e.negocio)} <span class="pill ${st}">${STATUS_TXT[st]}</span>${e.ajustado ? ` <span class="pill" style="background:color-mix(in srgb,#ffc35a 22%,transparent);color:#ffc35a">✨ Plano ajustado</span>` : ''}${e.pagInformado ? ` <span class="pill" style="background:color-mix(in srgb,#25d366 22%,transparent);color:#4ee38a">💰 informou Pix ${e.pagInformado.plano}</span>` : e.pagPendente ? ` <span class="pill" style="background:color-mix(in srgb,#f0b54a 22%,transparent);color:#f0b54a">🛒 assinou pelo site (${e.pagPendente.plano}) · aguardando Pix</span>` : ''}</div>
+          <div class="t">${esc(e.negocio)} <span class="pill ${st}">${STATUS_TXT[st]}</span>${e.ajustado ? ` <span class="pill" style="background:color-mix(in srgb,#ffc35a 22%,transparent);color:#ffc35a">✨ Plano ajustado</span>` : ''}${e.trial ? ((e.msgs || {}).boasvindas ? ` <span class="pill" style="background:color-mix(in srgb,#3fbf8a 18%,transparent);color:#6fe0ad" title="Enviada em ${new Date(e.msgs.boasvindas).toLocaleString('pt-BR')}">✅ boas-vindas</span>` : ` <span class="pill" style="background:color-mix(in srgb,#ff8fb8 20%,transparent);color:#ff9cc0">👋 enviar boas-vindas</span>`) : ''}${e.pagInformado ? ` <span class="pill" style="background:color-mix(in srgb,#25d366 22%,transparent);color:#4ee38a">💰 informou Pix ${e.pagInformado.plano}</span>` : e.pagPendente ? ` <span class="pill" style="background:color-mix(in srgb,#f0b54a 22%,transparent);color:#f0b54a">🛒 assinou pelo site (${e.pagPendente.plano}) · aguardando Pix</span>` : ''}</div>
           <div class="d">${n.label || ''} · <a href="${linkEmp(e.slug)}" target="_blank" rel="noopener">/${esc(e.slug)}</a> · usuário <b>${esc(e.login)}</b>${e.dono ? ' · ' + esc(e.dono) : ''}${e.donoTel ? ' · ' + esc(e.donoTel) : ''}${e.email && e.email !== e.login ? ' · ' + esc(e.email) : ''}${e.cnpj ? ' · CNPJ ' + esc(e.cnpj) : ''}${e.origem === 'site' ? ' · <span style="color:#b48cff">via site</span>' : ''}<br>
             ${e.vence ? `vence ${fmtData(e.vence)}${e.situacao === 'ativa' ? ` (${diasAte(e.vence)} dias)` : ''}` : 'sem vencimento'} · ${brl(e.valor)}/mês · ${e.clientes} clientes · ${e.funcionarios ? e.funcionarios + ' funcionário(s) · ' : ''}${e.agMes} agend. no mês · ${e.aparelhosPush ? `🔔 ${e.aparelhosPush} aparelho(s)` : '🔕 sem notificação'}${e.obs ? ' · ' + esc(e.obs) : ''}</div>
         </div>
         <div class="acts">
           <button class="btn ok sm" onclick="renovar('${e.slug}')">${e.trial ? 'Ativar plano' : 'Renovar'}</button>
+          ${e.trial && !(e.msgs || {}).boasvindas ? `<button class="btn sm" style="background:#ff6fa6" onclick="mensagem('${e.slug}','boasvindas')">👋 Boas-vindas</button>` : `<button class="btn ghost sm" onclick="mensagem('${e.slug}')" title="Enviar mensagem no WhatsApp">💬 Mensagem</button>`}
           <button class="btn ghost sm" onclick="ajustarValor('${e.slug}')" title="Ajustar valor da mensalidade">💲 Valor</button>
           <button class="btn ghost sm" onclick="formEmpresa('${e.slug}')">Editar</button>
           <button class="btn ghost sm" onclick="mais('${e.slug}')">⋯</button>
@@ -236,12 +240,63 @@ function renovar(slug) {
   });
 }
 
+/* ---------- mensagens no WhatsApp (boas-vindas e acompanhamento do teste) ---------- */
+async function carregarModelos() {
+  if (!DADOS.modelos) DADOS.modelos = (await api('GET', '/api/central/modelos')).modelos;
+  return DADOS.modelos;
+}
+function preencher(txt, e) {
+  const nome = (e.dono || e.negocio || '').split(' ')[0];
+  return txt.replace(/\{nome\}/g, nome).replace(/\{negocio\}/g, e.negocio).replace(/\{link\}/g, linkEmp(e.slug))
+    .replace(/\{usuario\}/g, e.login).replace(/\{vence\}/g, e.vence ? fmtData(e.vence) : 'sem vencimento').replace(/\{valor\}/g, brl(e.valor));
+}
+function modeloSugerido(e) {
+  const m = e.msgs || {};
+  if (e.trial && !m.boasvindas) return 'boasvindas';
+  if (e.situacao === 'vencida') return 'encerrado';
+  if (e.trial && e.vence && diasAte(e.vence) <= 1) return 'ultimodia';
+  return 'acompanhamento';
+}
+async function mensagem(slug, modelo) {
+  const e = DADOS.empresas.find(x => x.slug === slug); if (!e) return;
+  let M; try { M = await carregarModelos(); } catch (err) { return toast(err.message); }
+  const k = modelo || modeloSugerido(e), tel = zap(e.donoTel), m = e.msgs || {};
+  openModal('💬 Mensagem para ' + e.negocio, `
+    <p class="mut small">${esc(e.dono || '')}${e.donoTel ? ' · ' + esc(e.donoTel) : ''} · ${e.trial ? 'teste grátis' : 'assinante'}${e.vence ? ' até ' + fmtData(e.vence) : ''}</p>
+    <label>Modelo</label>
+    <select id="mdSel">${Object.entries(M).map(([id, x]) => `<option value="${id}" ${id === k ? 'selected' : ''}>${x.nome}${m[id] ? ' · ✓ enviada ' + new Date(m[id]).toLocaleDateString('pt-BR') : ''}</option>`).join('')}</select>
+    <label>Texto <span class="mut">(pode editar antes de enviar)</span></label>
+    <textarea id="mdTxt" rows="12" style="font-size:.92rem;line-height:1.45"></textarea>
+    ${tel ? '' : '<p class="small" style="color:var(--warn);margin-top:8px">⚠️ Este assinante não tem WhatsApp cadastrado. Edite o assinante para incluir, ou copie a mensagem.</p>'}
+    <div class="modal-foot" style="flex-wrap:wrap"><button type="button" class="btn ghost" onclick="copiarTexto($('#mdTxt').value)">Copiar</button>
+      ${tel ? `<a class="btn" id="mdWa" target="_blank" rel="noopener" style="background:#25d366;color:#06301a;text-decoration:none" href="#">💬 Abrir no WhatsApp</a>` : ''}</div>`);
+  const sel = $('#mdSel'), txt = $('#mdTxt');
+  const montar = () => { txt.value = preencher(M[sel.value].texto, e); atualizar(); };
+  const atualizar = () => { const a = $('#mdWa'); if (a) a.href = `https://wa.me/${tel}?text=${encodeURIComponent(txt.value)}`; };
+  sel.onchange = montar; txt.oninput = atualizar; montar();
+  const a = $('#mdWa');
+  if (a) a.addEventListener('click', async () => {
+    try { const r = await api('POST', `/api/central/empresas/${slug}/mensagem`, { modelo: sel.value }); Object.assign(e, r.empresa); } catch { }
+    setTimeout(() => { closeModal(); render(); toast('Mensagem aberta no WhatsApp ✓'); }, 400);
+  });
+}
+async function editarModelos() {
+  let M; try { M = await carregarModelos(); } catch (err) { return toast(err.message); }
+  openModal('✏️ Modelos de mensagem', `<form>
+    <p class="mut small">Use as palavras-chave e o sistema troca pelos dados de cada assinante: <b>{nome}</b> · <b>{negocio}</b> · <b>{link}</b> · <b>{usuario}</b> · <b>{vence}</b> · <b>{valor}</b>. Texto entre *asteriscos* fica em negrito no WhatsApp.</p>
+    ${Object.entries(M).map(([id, x]) => `<label style="margin-top:14px;display:flex;justify-content:space-between;align-items:center">${x.nome}<button type="button" class="btn ghost sm" onclick="this.closest('label').nextElementSibling.value=DADOS.modelos['${id}'].padrao">Restaurar padrão</button></label>
+      <textarea name="${id}" rows="7" style="font-size:.88rem;line-height:1.45">${esc(x.texto)}</textarea>`).join('')}
+    ${foot('Salvar modelos')}</form>`, async f => {
+    DADOS.modelos = (await api('PUT', '/api/central/modelos', f)).modelos; toast('Modelos salvos');
+  });
+}
 function mais(slug) {
   const e = DADOS.empresas.find(x => x.slug === slug), tel = zap(e.donoTel);
   const cobranca = `Olá${e.dono ? ' ' + e.dono.split(' ')[0] : ''}! Sua assinatura do AgendaPro (${e.negocio}) ${e.situacao === 'vencida' ? 'venceu em' : 'vence em'} ${fmtData(e.vence)}. Valor: ${brl(e.valor)}. Me avise quando fizer o pagamento para eu renovar. 😉`;
   openModal(e.negocio, `
     <div class="list">
       <div class="item"><div class="grow"><div class="t">Abrir painel do assinante</div><div class="d">${esc(linkEmp(slug))}</div></div><a class="btn ghost sm" target="_blank" rel="noopener" href="${linkEmp(slug)}">Abrir</a></div>
+      <div class="item"><div class="grow"><div class="t">Enviar mensagem no WhatsApp</div><div class="d">Boas-vindas, acompanhamento do teste, último dia, teste encerrado</div></div><button class="btn ghost sm" onclick="mensagem('${slug}')">💬 Mensagem</button></div>
       <div class="item"><div class="grow"><div class="t">Valor da mensalidade</div><div class="d">${e.ajustado ? `✨ Plano ajustado: ${brl(e.valor)}/mês` : `Padrão: ${brl(e.valor)}/mês`}</div></div><button class="btn ghost sm" onclick="ajustarValor('${slug}')">💲 Ajustar</button></div>
       <div class="item"><div class="grow"><div class="t">Redefinir senha</div><div class="d">Gera nova senha e desconecta o dono dos aparelhos</div></div><button class="btn ghost sm" onclick="novaSenha('${slug}')">Redefinir</button></div>
       ${e.vence && tel ? `<div class="item"><div class="grow"><div class="t">Cobrar no WhatsApp</div><div class="d">Mensagem pronta com vencimento e valor</div></div><a class="btn ghost sm" target="_blank" rel="noopener" href="https://wa.me/${tel}?text=${encodeURIComponent(cobranca)}">💬 Cobrar</a></div>` : ''}
@@ -308,7 +363,7 @@ async function excluir(slug) {
 }
 
 /* ---------- notificações da Central ---------- */
-const ICON_EV = { teste: '🎉', vence: '⏳', venceu: '⛔', pago: '💰' };
+const ICON_EV = { teste: '🎉', vence: '⏳', venceu: '⛔', pago: '💰', assinatura: '🛒' };
 function quando(iso) {
   const d = new Date(iso), min = Math.round((Date.now() - d) / 60000);
   if (min < 1) return 'agora'; if (min < 60) return `há ${min} min`; if (min < 1440) return `há ${Math.round(min / 60)} h`;
@@ -326,7 +381,7 @@ async function abrirNotif() {
     <p class="small">${statusPushCentral()}</p>
     <div class="acts" style="margin-top:8px">${'PushManager' in window ? `<button class="btn sm" onclick="ativarPushCentral()">${window.Notification?.permission === 'granted' ? 'Reativar neste aparelho' : 'Ativar neste aparelho'}</button><button class="btn ghost sm" onclick="testarPushCentral()">Enviar teste</button>` : ''}</div>
     <p class="mut small" style="margin-top:8px">Você é avisado quando alguém cria um teste grátis pelo site, quando alguém informa que pagou o Pix, quando um assinante vence amanhã e quando vence.</p>
-    <div class="list" style="margin-top:12px">${ev.length ? ev.map(x => `<div class="item"><div style="font-size:1.3rem">${ICON_EV[x.tipo] || '•'}</div><div class="grow"><div class="t" style="font-weight:${x.em > (DADOS.lidosAte || '') ? 800 : 600}">${esc(x.titulo.replace(/^\S+\s/, ''))}</div><div class="d">${esc(x.texto)}<br>${quando(x.em)}${x.slug && DADOS.empresas.some(e => e.slug === x.slug) ? ` · <a href="#" style="color:var(--ac)" onclick="closeModal();ui.busca='${esc(x.slug)}';ui.filtro='todas';render();return false">ver assinante</a>` : ''}</div></div></div>`).join('') : '<div class="empty">Nenhuma notificação ainda.</div>'}</div>`);
+    <div class="list" style="margin-top:12px">${ev.length ? ev.map(x => `<div class="item"><div style="font-size:1.3rem">${ICON_EV[x.tipo] || '•'}</div><div class="grow"><div class="t" style="font-weight:${x.em > (DADOS.lidosAte || '') ? 800 : 600}">${esc(x.titulo.replace(/^\S+\s/, ''))}</div><div class="d">${esc(x.texto)}<br>${quando(x.em)}${x.slug && DADOS.empresas.some(e => e.slug === x.slug) ? ` · <a href="#" style="color:var(--ac)" onclick="closeModal();ui.busca='${esc(x.slug)}';ui.filtro='todas';render();return false">ver assinante</a>${['teste', 'assinatura'].includes(x.tipo) ? ` · <a href="#" style="color:#ff9cc0;font-weight:700" onclick="mensagem('${esc(x.slug)}','boasvindas');return false">👋 enviar boas-vindas</a>` : ''}` : ''}</div></div></div>`).join('') : '<div class="empty">Nenhuma notificação ainda.</div>'}</div>`);
   if (DADOS.naoLidos) { try { await api('POST', '/api/central/eventos/lidos'); DADOS.naoLidos = 0; render(); } catch { } }
 }
 function b64ToU8(b64) { const s = atob((b64 + '='.repeat((4 - b64.length % 4) % 4)).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(s, c => c.charCodeAt(0)); }

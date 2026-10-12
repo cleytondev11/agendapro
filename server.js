@@ -730,9 +730,29 @@ function resumo(E) {
     ultimoUso: E.agendamentos.map(a => a.criadoEm || '').sort().pop()?.slice(0, 10) || '',
     aparelhosPush: E.pushSubs.length, trial: !!E.meta.trial, email: E.meta.email || '', origem: E.meta.origem || '',
     funcionarios: E.users.filter(u => u.role === 'func').length,
-    pagInformado: E.meta.pagInformado || null, pagPendente: E.meta.pagPendente || null, temLogo: !!E.config.empresa?.logo, cnpj: E.config.empresa?.cnpj || ''
+    pagInformado: E.meta.pagInformado || null, pagPendente: E.meta.pagPendente || null, msgs: E.meta.msgs || {}, temLogo: !!E.config.empresa?.logo, cnpj: E.config.empresa?.cnpj || ''
   };
 }
+/* ----- modelos de mensagem da Central (boas-vindas e acompanhamento do teste) ----- */
+const MODELOS_PADRAO = {
+  boasvindas: { nome: '👋 Boas-vindas', texto: `Olá, {nome}! Seja muito bem-vindo(a) ao AgendaPro Beleza! 🎉\n\nSeu teste grátis da *{negocio}* já está liberado até *{vence}*.\n\n🔗 Seu painel: {link}\n👤 Usuário: {usuario}\n\nPara começar com o pé direito:\n1️⃣ Ajustes → Dados da empresa: coloque sua logo e endereço\n2️⃣ Serviços: confira seus preços e tempos\n3️⃣ Ajustes → Pix e sinal: cadastre sua chave para cobrar o sinal\n4️⃣ Instalar app: deixe o AgendaPro na tela do seu celular\n5️⃣ Mande seu link para os clientes agendarem sozinhos 🚀\n\nQualquer dúvida, é só me chamar aqui. Estou à disposição para te ajudar a configurar! 😉` },
+  acompanhamento: { nome: '🤝 Como está indo? (2º dia)', texto: `Oi, {nome}! Tudo bem? 😊\n\nPassando para saber como está sendo o teste do AgendaPro na *{negocio}*. Conseguiu configurar seus serviços e mandar o link para algum cliente?\n\nSe quiser, faço uma chamada rápida e te ajudo a deixar tudo pronto. 😉\n\n🔗 {link}` },
+  ultimodia: { nome: '⏳ Último dia do teste', texto: `Oi, {nome}! Seu teste grátis do AgendaPro termina em *{vence}*. ⏳\n\nPara continuar com sua agenda, clientes e configurações, é só assinar por *{valor}/mês* (sem fidelidade). No painel, toque em *Assinar agora* e pague com Pix.\n\n🔗 {link}\n\nQualquer dúvida, me chama! 💜` },
+  encerrado: { nome: '🔒 Teste encerrado', texto: `Oi, {nome}! O teste grátis da *{negocio}* terminou, mas está tudo guardado: agenda, clientes e serviços. 💾\n\nPara voltar a usar, assine por *{valor}/mês* e eu libero na hora: {link}\n\nPosso te ajudar com alguma dúvida? 😊` }
+};
+const modelos = () => Object.fromEntries(Object.entries(MODELOS_PADRAO).map(([k, m]) => [k, { nome: m.nome, texto: META.modelos?.[k] || m.texto, padrao: m.texto }]));
+route('GET', '/api/central/modelos', 'central', () => ({ modelos: modelos() }));
+route('PUT', '/api/central/modelos', 'central', (req, b) => {
+  META.modelos = META.modelos || {};
+  for (const k of Object.keys(MODELOS_PADRAO)) if (typeof b[k] === 'string') { const t = str(b[k], 3000); if (!t || t === MODELOS_PADRAO[k].texto) delete META.modelos[k]; else META.modelos[k] = t; }
+  marcar('meta'); flush(); return { modelos: modelos() };
+});
+route('POST', '/api/central/empresas/:slug/mensagem', 'central', (req, b, p) => {
+  const E = empCentral(p.slug), k = str(b.modelo, 30);
+  E.meta.msgs = E.meta.msgs || {}; E.meta.msgs[k || 'livre'] = new Date().toISOString(); salvar(E);
+  return { empresa: resumo(E) };
+});
+
 route('GET', '/api/central/empresas', 'central', () => ({
   banco: { tipo: pool ? 'postgres' : 'arquivo', pendentes: sujos.size, ultimaGravacao: ST.ultimaGravacao, ultimoErro: sujos.size ? ST.ultimoErro : '', iniciadoEm: INICIO },
   hoje: hojeSP(), suporte: SUPORTE, vapidPublic: META.vapid?.publicKey, aparelhosCentral: META.centralSubs.length,
