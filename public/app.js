@@ -232,7 +232,7 @@ function renderNaoEncontrada() {
 }
 function renderSuspenso(msg) {
   const sup = PUB?.suporte, trial = PUB?.trial;
-  const dono = me?.role === 'admin', func = me?.role === 'func';
+  const dono = me?.role === 'admin' || PUB?.papel === 'admin', func = me?.role === 'func' || PUB?.papel === 'func';
   const valor = 'R$ ' + Number(PUB?.valor || 39.9).toFixed(2).replace('.', ',') + '/mês';
   const titulo = dono ? (trial ? 'Seu teste grátis terminou' : esc(msg || 'Sua assinatura está suspensa ou vencida.'))
     : func ? 'O acesso está suspenso no momento.' : 'A agenda online está temporariamente indisponível.';
@@ -242,7 +242,7 @@ function renderSuspenso(msg) {
     <p style="margin-top:14px;font-weight:700">${titulo}</p>
     <p class="mut small" style="margin-top:6px">${texto}</p>
     ${dono ? `<button class="btn block" onclick="abrirAssinatura()">${trial ? '💳 Assinar agora (Pix ou cartão)' : '💳 Renovar (Pix ou cartão)'}</button>
-      <p class="mut small" style="margin-top:10px;text-align:center">Mensal R$ 39,90 · Anual R$ 399,90 (${window.AgendaProAssinar ? AgendaProAssinar.desconto : 16}% off)</p>` : ''}
+      <p class="mut small" style="margin-top:10px;text-align:center">${PUB?.assinatura?.promo ? `🔥 Promoção: ${valor} por 6 meses · ` : 'Mensal R$ 39,90 · '}Anual R$ 399,90 em até 12x · Pix ou cartão</p>` : ''}
     ${dono && sup ? `<a class="btn ghost block" target="_blank" rel="noopener" href="https://wa.me/${sup}?text=${encodeURIComponent('Olá! Preciso de ajuda com o acesso do AgendaPro. Negócio: ' + (PUB?.config?.negocio || '') + ' (link /' + SLUG + ').')}">💬 Falar com o suporte</a>` : ''}
     ${dono || func ? '<button class="btn ghost block" onclick="setToken(\'\');location.reload()">Sair</button>' : '<p class="small" style="margin-top:18px"><a href="/entrar" style="color:var(--mut)">É o dono? Entrar no painel</a></p>'}`);
 }
@@ -333,7 +333,7 @@ function renderLogin(tab = 'entrar') {
 /* ---------------- shell / navegação ---------------- */
 const NAV_ADMIN = [
   ['dashboard', '📊', 'Dashboard'], ['agenda', '📅', 'Agenda'], ['vendas', '🛍️', 'Vendas'], ['financeiro', '💰', 'Financeiro'],
-  ['estoque', '📦', 'Estoque'], ['compras', '🧾', 'Compras'], ['clientes', '👥', 'Clientes'], ['equipe', '🧑‍💼', 'Equipe'], ['servicos', '✂️', 'Serviços'], ['config', '⚙️', 'Ajustes'], ['instalar', '📲', 'Instalar app']
+  ['estoque', '📦', 'Estoque'], ['compras', '🧾', 'Compras'], ['clientes', '👥', 'Clientes'], ['equipe', '🧑‍💼', 'Equipe'], ['servicos', '✂️', 'Serviços'], ['assinatura', '💳', 'Minha assinatura'], ['config', '⚙️', 'Ajustes'], ['instalar', '📲', 'Instalar app']
 ];
 const NAV_FUNC = [['agenda', '📅', 'Minha agenda'], ['resumo', '📈', 'Meu mês'], ['perfil', '👤', 'Perfil'], ['instalar', '📲', 'Instalar']];
 const NAV_CLI = [['agendar', '➕', 'Agendar'], ['meus', '📅', 'Meus horários'], ['perfil', '👤', 'Perfil'], ['instalar', '📲', 'Instalar']];
@@ -364,17 +364,60 @@ function shell(title, actions, body) {
     <a onclick="logout()"><span class="i">🚪</span>Sair</a></div>`;
 }
 
+/* ---------------- Minha assinatura (dono) ---------------- */
+const FORMA_TXT = { pix: '⚡ Pix', cartao: '💳 Cartão', 'cartao-auto': '🔁 Cartão automático', manual: '🤝 Liberado pelo suporte' };
+const PLANO_TXT = { promo: '🔥 Mensal promocional', ajustado: '✨ Plano ajustado', mensal: 'Plano mensal', anual: 'Plano anual' };
+async function vAssinatura() {
+  shell('Minha assinatura', '', `<div id="assBox"><div class="card"><p class="mut">Carregando…</p></div></div>`);
+  let A;
+  try { A = await api('GET', '/api/assinatura'); ASSIN = { ...(ASSIN || {}), ...A }; } catch (e) { if ($('#assBox')) $('#assBox').innerHTML = `<div class="card"><p>${esc(e.message)}</p></div>`; return; }
+  if (view !== 'assinatura' || !$('#assBox')) return;
+  const hoje = today(), dias = A.vence ? Math.round((new Date(A.vence + 'T12:00:00') - new Date(hoje + 'T12:00:00')) / 864e5) : null;
+  const st = A.situacao !== 'ativa' ? ['Vencida', 'bad'] : A.trial ? ['Teste grátis', 'trial'] : dias !== null && dias <= 5 ? ['Vence em breve', 'warn'] : ['Ativa', 'ok'];
+  const per = A.trial ? 3 : 30, pct = dias === null ? 100 : Math.max(4, Math.min(100, Math.round(dias / per * 100)));
+  const rec = A.recorrente, pend = A.pendente, sup = PUB?.suporte;
+  const hist = (A.historico || []).map(h => `<div class="ass-h"><div class="i">${(FORMA_TXT[h.forma] || '💳').split(' ')[0]}</div><div class="grow"><b>${h.valor ? brl(h.valor) : '—'}</b> · ${esc((FORMA_TXT[h.forma] || '').replace(/^\S+\s/, ''))}${h.parcelas > 1 ? ` em ${h.parcelas}x` : ''}<div class="small mut">${new Date(h.em).toLocaleDateString('pt-BR')} · ${PLANO_TXT[h.plano] || (h.dias >= 365 ? 'Plano anual' : `${h.dias || 30} dias`)}${h.ate ? ` · liberado até ${fmtData(h.ate)}` : ''}</div></div><span class="ass-pago">Pago</span></div>`).join('');
+  $('#assBox').innerHTML = `
+    <div class="ass-hero">
+      <div class="ass-top"><span class="ass-st ${st[1]}">${st[0]}</span>${rec ? '<span class="ass-st auto">🔁 Renovação automática</span>' : ''}</div>
+      <div class="ass-plano">${PLANO_TXT[A.plano] || 'Plano mensal'}</div>
+      <div class="ass-val">${brl(A.valor)}<small>/mês</small></div>
+      ${A.vence ? `<div class="ass-bar"><i style="width:${pct}%"></i></div>
+      <div class="ass-vence">${A.situacao !== 'ativa' ? `Venceu em <b>${fmtData(A.vence)}</b>` : `${A.trial ? 'Teste grátis' : 'Válida'} até <b>${fmtData(A.vence)}</b> · ${dias <= 0 ? 'vence hoje' : `faltam ${dias} dia${dias > 1 ? 's' : ''}`}`}</div>` : ''}
+      <div class="acts" style="margin-top:14px">${rec && A.situacao === 'ativa' ? '' : `<button class="btn" style="background:#fff;color:#2a1640" onclick="abrirAssinatura()">💳 ${A.trial ? 'Assinar agora' : 'Pagar / renovar'}</button>`}</div>
+    </div>
+    ${A.promo ? `<div class="card ass-promo">🔥 <b>Promoção de lançamento</b><div class="small" style="margin-top:4px">${A.promo.fim ? `Você paga ${brl(A.valor)}/mês até <b>${fmtData(A.promo.fim)}</b>. Depois a mensalidade volta para R$ 39,90.` : `Assine até <b>${fmtData(A.promo.ate)}</b> e pague ${brl(A.valor)}/mês durante 6 meses (normal R$ 39,90).`}</div></div>` : ''}
+    ${pend ? `<div class="card" style="border-color:var(--warn)"><h3>⏳ Pagamento em aberto</h3><p class="small">${pend.tipo === 'cartao' ? (pend.recorrente ? 'Renovação automática no cartão' : 'Pagamento no cartão') : 'Pix'} de <b>${pend.parcelas > 1 ? `${pend.parcelas}x de ${brl(pend.valor / pend.parcelas)}` : brl(pend.valor)}</b> · ${esc(pend.nomePlano || '')} · gerado em ${new Date(pend.criado).toLocaleDateString('pt-BR')}</p>
+      <div class="acts" style="margin-top:10px"><button class="btn sm" onclick="abrirAssinatura(${pend.plano === 'anual' ? "'anual'" : 'undefined'}, '${pend.tipo === 'cartao' ? 'cartao' : 'pix'}')">Continuar pagamento</button></div></div>` : ''}
+    <div class="card"><h3>Forma de pagamento</h3>
+      ${rec ? `<div class="ass-fp"><div class="i">💳</div><div class="grow"><b>Cartão de crédito · renovação automática</b><div class="small mut">${brl(rec.valor)} cobrados todo mês pelo Asaas. O acesso renova sozinho a cada cobrança.</div></div></div>
+        <div class="acts" style="margin-top:10px"><button class="btn ghost sm" onclick="cancelarRecorrente()">Cancelar renovação automática</button></div>`
+      : `<div class="ass-fp"><div class="i">⚡</div><div class="grow"><b>Pagamento manual (Pix ou cartão)</b><div class="small mut">Você paga a cada período. A liberação é automática assim que o pagamento cai.</div></div></div>
+        ${A.online ? `<div class="ass-dica"><b>🔁 Ative a renovação automática no cartão</b><div class="small">Cobra ${brl(A.valor)} todo mês e você nunca fica sem acesso. Cancele quando quiser.</div><button class="btn sm" style="margin-top:10px" onclick="abrirAssinatura(undefined, 'cartao')">Ativar no cartão</button></div>` : ''}`}
+      ${A.recorrenteInfo && A.recorrenteInfo.status !== 'ACTIVE' && A.recorrenteInfo.canceladaEm ? `<p class="small mut" style="margin-top:8px">Renovação automática cancelada em ${new Date(A.recorrenteInfo.canceladaEm).toLocaleDateString('pt-BR')}.</p>` : ''}
+    </div>
+    <div class="card"><h3>Histórico de pagamentos</h3>${hist || '<p class="small mut">Nenhum pagamento ainda.</p>'}</div>
+    <div class="card"><h3>Dados de cobrança</h3>
+      <div class="ass-dados"><div><span>Titular</span><b>${esc(me?.nome || '')}</b></div><div><span>CPF/CNPJ</span><b>${A.doc ? esc(A.doc) : '<span class="mut">informado no 1º pagamento</span>'}</b></div><div><span>Cliente desde</span><b>${A.criado ? new Date(A.criado).toLocaleDateString('pt-BR') : '—'}</b></div></div>
+    </div>
+    <div class="card"><h3>Dúvidas</h3>
+      <details class="ass-faq"><summary>Como funciona a renovação automática?</summary><p class="small">Você cadastra o cartão uma vez na página segura do Asaas. Todo mês a mensalidade é cobrada e o acesso renova sozinho. Pode cancelar aqui a qualquer momento — o acesso continua até o fim do período pago.</p></details>
+      <details class="ass-faq"><summary>Paguei e não liberou. E agora?</summary><p class="small">A liberação costuma levar segundos no Pix e alguns minutos no cartão. Se passar disso, fale com o suporte e envie o comprovante.</p></details>
+      <details class="ass-faq"><summary>O que acontece se vencer?</summary><p class="small">O painel fica pausado, mas seus dados (agenda, clientes, financeiro) continuam guardados. É só pagar para voltar de onde parou.</p></details>
+      ${sup ? `<a class="btn ghost sm" style="margin-top:12px" target="_blank" rel="noopener" href="https://wa.me/${sup}?text=${encodeURIComponent('Olá! Tenho uma dúvida sobre a minha assinatura do AgendaPro. Negócio: ' + (S.config?.negocio || '') + ' (/' + SLUG + ').')}">💬 Falar com o suporte</a>` : ''}
+    </div>`;
+}
 function cancelarRecorrente() {
   openModal('Cancelar renovação automática', `<p>O cartão não será mais cobrado todo mês. Seu acesso continua até <b>${fmtData(ASSIN?.vence)}</b> e depois você pode renovar por Pix ou cartão quando quiser.</p>
     <div class="acts" style="margin-top:14px"><button class="btn ghost" onclick="closeModal()">Manter</button><button class="btn bad" id="btCancRec">Cancelar renovação</button></div>`);
   $('#btCancRec').onclick = async () => {
-    try { await api('DELETE', '/api/assinatura/recorrente'); closeModal(); toast('Renovação automática cancelada.'); const r = await api('GET', '/api/me'); ASSIN = r.assinatura || ASSIN; go(view, true); } catch (e) { toast(e.message); }
+    try { await api('DELETE', '/api/assinatura/recorrente'); closeModal(); toast('Renovação automática cancelada.'); const r = await api('GET', '/api/me'); ASSIN = r.assinatura || null; go(view, true); } catch (e) { toast(e.message); }
   };
 }
-function abrirAssinatura(plano) {
+function abrirAssinatura(plano, metodo) {
   if (!window.AgendaProAssinar) return toast('Não foi possível abrir o pagamento. Recarregue a página.');
   const as = ASSIN || PUB?.assinatura;
-  AgendaProAssinar.abrir({ plano, negocio: (S.config || PUB?.config || {}).negocio, slug: SLUG, login: me?.login, token: TOKEN, recorrente: as?.recorrente || null, ajustado: as?.ajustado || as?.promo ? { valor: as.valor, promo: as.promo || null } : null, onPago: () => { ASSIN = null; } });
+  AgendaProAssinar.abrir({ plano, metodo, negocio: (S.config || PUB?.config || {}).negocio, slug: SLUG, login: me?.login, token: TOKEN, recorrente: as?.recorrente || null, ajustado: as?.ajustado || as?.promo ? { valor: as.valor, promo: as.promo || null } : null, onPago: () => { ASSIN = null; } });
 }
 function avisoVencimento() {
   if (me?.role !== 'admin' || !ASSIN?.vence) return '';
@@ -397,7 +440,7 @@ function go(v, keepScroll) {
   const mudou = v !== view;
   view = v;
   if (v === 'agendar' && mudou) ui.slots = {};
-  ({ dashboard: vDashboard, agenda: vAgenda, vendas: vVendas, financeiro: vFinanceiro, estoque: vEstoque, compras: vCompras, clientes: vClientes, equipe: vEquipe, servicos: vServicos, config: vConfig, agendar: vAgendar, meus: vMeus, perfil: isFunc() ? vPerfilFunc : vPerfil, resumo: vResumo, instalar: vInstalar })[v]();
+  ({ dashboard: vDashboard, agenda: vAgenda, vendas: vVendas, financeiro: vFinanceiro, estoque: vEstoque, compras: vCompras, clientes: vClientes, equipe: vEquipe, servicos: vServicos, config: vConfig, assinatura: vAssinatura, agendar: vAgendar, meus: vMeus, perfil: isFunc() ? vPerfilFunc : vPerfil, resumo: vResumo, instalar: vInstalar })[v]();
   if (!keepScroll) window.scrollTo(0, 0);
 }
 
@@ -1208,12 +1251,9 @@ function vConfig() {
         <p class="mut small">${S.profissionais.filter(p => p.ativo !== false).length} profissional(is) ativo(s). Cadastre funcionários e dê a cada um o próprio acesso ao app.</p>
         <button class="btn ghost sm" style="margin-top:10px" onclick="go('equipe')">🧑‍💼 Gerenciar equipe</button>
       </div>
-      <div class="card" style="margin-top:12px"><h3>Assinatura</h3>
-        <p class="small">${ASSIN?.vence ? `${ASSIN.trial ? 'Teste grátis' : 'Válida'} até <b>${fmtData(ASSIN.vence)}</b>` : 'Ativa'}</p>
-        <p class="small" style="margin-top:4px">${ASSIN?.ajustado ? `✨ <b>Plano ajustado</b>: ${brl(ASSIN.valor)}/mês (valor especial)` : ASSIN?.promo ? `🔥 <b>Promoção</b>: ${brl(ASSIN.valor)}/mês por 6 meses${ASSIN.promo.fim ? ` (até ${fmtData(ASSIN.promo.fim)})` : ` para quem assinar até ${fmtData(ASSIN.promo.ate)}`}, depois R$ 39,90` : `Plano mensal: ${brl(ASSIN?.valor || 39.9)}/mês`}</p>
-        ${ASSIN?.recorrente ? `<p class="small" style="margin-top:6px;color:var(--ok,#3fbf8a)">🔁 <b>Renovação automática no cartão ativa</b> · ${brl(ASSIN.recorrente.valor)}/mês. O acesso renova sozinho a cada cobrança.</p>` : ''}
-        <div class="acts" style="margin-top:10px"><button class="btn sm" onclick="abrirAssinatura()">💳 ${ASSIN?.trial ? 'Assinar' : 'Renovar'} (Pix ou cartão)</button>${ASSIN?.recorrente ? `<button class="btn ghost sm" onclick="cancelarRecorrente()">Cancelar renovação automática</button>` : ''}${ASSIN?.ajustado || ASSIN?.promo ? '' : `<button class="btn ghost sm" onclick="abrirAssinatura('anual')">Plano anual −${window.AgendaProAssinar ? AgendaProAssinar.desconto : 16}%</button>`}</div>
-        <p class="small" style="margin-top:8px">${PUB.suporte ? `<a style="color:var(--ac)" target="_blank" rel="noopener" href="https://wa.me/${PUB.suporte}">Falar com o suporte</a>` : ''}</p>
+      <div class="card" style="margin-top:12px"><h3>💳 Minha assinatura</h3>
+        <p class="small">${ASSIN?.vence ? `${ASSIN.trial ? 'Teste grátis' : 'Válida'} até <b>${fmtData(ASSIN.vence)}</b>` : 'Ativa'} · ${brl(ASSIN?.valor || 39.9)}/mês${ASSIN?.recorrente ? ' · 🔁 renovação automática' : ''}</p>
+        <div class="acts" style="margin-top:10px"><button class="btn sm" onclick="go('assinatura')">Ver minha assinatura</button></div>
       </div>
       <div class="card" style="margin-top:12px"><h3>📲 Instalar o app</h3>
         <p class="mut small">Veja como instalar no celular ou no computador, e mande o passo a passo para a sua equipe.</p>

@@ -300,7 +300,7 @@ route('POST', '/api/login-dono', null, (req, b) => {
     const u = E.users.find(u => (u.role === 'admin' || u.role === 'func') && u.login === login);
     if (u && checkPw(b.senha, u.senha)) {
       if (u.bloqueado) fail(403, 'Seu acesso foi desativado. Fale com o responsável.');
-      if (situacao(E) !== 'ativa') fail(403, E.meta.trial ? 'Seu teste grátis terminou. Fale com o suporte para assinar.' : 'Acesso suspenso. Fale com o suporte para renovar.');
+      if (situacao(E) !== 'ativa' && u.role !== 'admin') fail(403, 'Acesso suspenso. Fale com o responsável pelo estabelecimento.'); // o dono entra para poder pagar
       const token = novaSessao(E.sessions, u.id); salvar(E);
       return { slug: E.meta.slug, token };
     }
@@ -457,12 +457,24 @@ async function confirmarPagamento(E, pay) {
   }
   renovarEmpresa(E, dias, anual ? false : undefined, ateMin);
   if (c) { c.status = 'RECEIVED'; c.pagoEm = new Date().toISOString(); }
+  registrarHistorico(E, { valor: Number(pay.installment ? (c?.valor || pay.value * (pay.installmentCount || 1)) : pay.value), forma: pay.billingType === 'CREDIT_CARD' ? (recorr ? 'cartao-auto' : 'cartao') : 'pix', parcelas: c?.parcelas || pay.installmentCount || 1, plano: c?.plano || (anual ? 'anual' : 'mensal'), dias });
   const forma = pay.billingType === 'CREDIT_CARD' ? (recorr ? 'cartão (renovação automática)' : 'cartão') : 'Pix';
   evento('pago', `✅ Pagamento confirmado: ${E.config.negocio}`, `${brl(pay.installment ? (c?.valor || pay.value) : pay.value)} no ${forma} pelo Asaas · acesso liberado automaticamente até ${fmtData(m.vence)}.`, m.slug);
   sincronizarRecorrente(E);
   pushAdmins(E, '✅ Pagamento confirmado', `Obrigado! Seu AgendaPro está liberado até ${fmtData(m.vence)}.`).catch(() => { });
   changed(E); await gravarAgora();
 }
+function registrarHistorico(E, h) {
+  E.meta.historico = [{ em: new Date().toISOString(), ate: E.meta.vence, ...h }, ...(E.meta.historico || [])].slice(0, 36);
+}
+const mascaraDoc = d => d ? (d.length === 11 ? `***.${d.slice(3, 6)}.${d.slice(6, 9)}-**` : `**.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-**`) : '';
+route('GET', T + '/assinatura', 'admin', req => {
+  const E = req.E, m = E.meta, c = m.cobranca;
+  return { ...assinaturaInfo(E), situacao: situacao(E), bloqueado: !!m.bloqueado, plano: ehAjustado(E) ? 'ajustado' : emPromo(E) ? 'promo' : 'mensal',
+    doc: mascaraDoc(m.asaas?.doc || ''), historico: m.historico || [], criado: m.criado || '',
+    recorrenteInfo: m.recorrente ? { status: m.recorrente.status, valor: m.recorrente.valor, criado: m.recorrente.criado, canceladaEm: m.recorrente.canceladaEm || '' } : null,
+    pendente: c && c.status === 'PENDING' ? { tipo: c.tipo || 'pix', valor: c.valor, plano: c.plano, nomePlano: NOME_PLANO[c.plano], recorrente: !!c.recorrente, parcelas: c.parcelas || 1, criado: c.criado, venc: c.venc } : null };
+});
 async function clienteAsaas(E) {
   const m = E.meta;
   if (!m.asaas.customer) {
@@ -602,6 +614,7 @@ route('POST', T + '/login', 'empresa', (req, b) => {
   const u = E.users.find(u => u.login === login || (tel.length >= 10 && u.login === tel));
   if (!u || !checkPw(b.senha, u.senha)) { falhou(req.ip); fail(401, 'Usuário ou senha incorretos.'); }
   if (u.bloqueado) fail(403, 'Acesso bloqueado. Fale com o estabelecimento.');
+  if (situacao(E) !== 'ativa' && u.role !== 'admin') fail(423, 'A agenda online está temporariamente indisponível. Fale com o estabelecimento.');
   const token = novaSessao(E.sessions, u.id); salvar(E);
   return { token, user: pubUser(u) };
 });
@@ -1076,6 +1089,7 @@ route('POST', '/api/central/empresas/:slug/cancelar-recorrente', 'central', asyn
 route('POST', '/api/central/empresas/:slug/renovar', 'central', async (req, b, p) => {
   const E = empCentral(p.slug), dias = Math.min(Math.max(parseInt(b.dias) || 30, 1), 3660);
   renovarEmpresa(E, dias, typeof b.promo === 'boolean' ? b.promo : undefined);
+  registrarHistorico(E, { forma: 'manual', dias, valor: dias >= 365 && !ehAjustado(E) && !emPromo(E) ? 399.9 : Math.round(valorPlano(E) * Math.max(1, Math.round(dias / 30)) * 100) / 100 });
   changed(E); if (!(await gravarAgora())) fail(503, ERRO_BANCO);
   return { empresa: resumo(E) };
 });
@@ -1210,7 +1224,7 @@ const server = http.createServer(async (req, res) => {
         if (r.auth === 'staff' && u.role !== 'admin' && u.role !== 'func') fail(403, 'Acesso restrito à equipe.');
         req.user = u;
       }
-      if (situacao(E) !== 'ativa' && !url.pathname.endsWith('/public') && !/\/assinatura\/(pix|cartao|recorrente)/.test(url.pathname)) fail(423, situacao(E) === 'vencida' ? 'Assinatura vencida. Fale com o suporte para renovar.' : 'Acesso suspenso. Fale com o suporte.');
+      if (situacao(E) !== 'ativa' && !url.pathname.endsWith('/public') && !/\/(assinatura(\/(pix|cartao|recorrente)|$)|login$)/.test(url.pathname)) fail(423, situacao(E) === 'vencida' ? 'Assinatura vencida. Fale com o suporte para renovar.' : 'Acesso suspenso. Fale com o suporte.');
     }
     const body = ['POST', 'PUT', 'DELETE'].includes(req.method) ? await readBody(req) : {};
     send(res, 200, await r.fn(req, body, params));

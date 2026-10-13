@@ -325,7 +325,7 @@
     const a = document.createElement('a'); a.href = `https://wa.me/${WHATS}?text=${encodeURIComponent(msg)}`; a.target = '_blank'; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove();
   }
   function abrir(opts = {}) {
-    ctx = opts; cob = null; metodo = 'pix'; recorr = true; parcelas = 1; janela = null; plano = opts.ajustado ? 'ajustado' : opts.plano === 'anual' ? 'anual' : promoAberta() ? 'promo' : 'mensal';
+    ctx = opts; cob = null; metodo = opts.metodo === 'cartao' ? 'cartao' : 'pix'; recorr = true; parcelas = 1; janela = null; plano = opts.ajustado ? 'ajustado' : opts.plano === 'anual' ? 'anual' : promoAberta() ? 'promo' : 'mensal';
     if (!estilo) { const s = document.createElement('style'); s.textContent = css; document.head.appendChild(s); estilo = true; }
     fechar();
     const bg = document.createElement('div'); bg.id = 'apx'; bg.className = 'apx-bg';
