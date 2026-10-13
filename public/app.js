@@ -241,7 +241,7 @@ function renderSuspenso(msg) {
   $('#app').innerHTML = telaSimples(trial && dono ? '🎁' : '⏸️', esc(PUB?.config?.negocio || 'Agenda'), `
     <p style="margin-top:14px;font-weight:700">${titulo}</p>
     <p class="mut small" style="margin-top:6px">${texto}</p>
-    ${dono ? `<button class="btn block" onclick="abrirAssinatura()">${trial ? '💳 Assinar agora com Pix' : '💳 Renovar com Pix'}</button>
+    ${dono ? `<button class="btn block" onclick="abrirAssinatura()">${trial ? '💳 Assinar agora (Pix ou cartão)' : '💳 Renovar (Pix ou cartão)'}</button>
       <p class="mut small" style="margin-top:10px;text-align:center">Mensal R$ 39,90 · Anual R$ 399,90 (${window.AgendaProAssinar ? AgendaProAssinar.desconto : 16}% off)</p>` : ''}
     ${dono && sup ? `<a class="btn ghost block" target="_blank" rel="noopener" href="https://wa.me/${sup}?text=${encodeURIComponent('Olá! Preciso de ajuda com o acesso do AgendaPro. Negócio: ' + (PUB?.config?.negocio || '') + ' (link /' + SLUG + ').')}">💬 Falar com o suporte</a>` : ''}
     ${dono || func ? '<button class="btn ghost block" onclick="setToken(\'\');location.reload()">Sair</button>' : '<p class="small" style="margin-top:18px"><a href="/entrar" style="color:var(--mut)">É o dono? Entrar no painel</a></p>'}`);
@@ -364,10 +364,17 @@ function shell(title, actions, body) {
     <a onclick="logout()"><span class="i">🚪</span>Sair</a></div>`;
 }
 
+function cancelarRecorrente() {
+  openModal('Cancelar renovação automática', `<p>O cartão não será mais cobrado todo mês. Seu acesso continua até <b>${fmtData(ASSIN?.vence)}</b> e depois você pode renovar por Pix ou cartão quando quiser.</p>
+    <div class="acts" style="margin-top:14px"><button class="btn ghost" onclick="closeModal()">Manter</button><button class="btn bad" id="btCancRec">Cancelar renovação</button></div>`);
+  $('#btCancRec').onclick = async () => {
+    try { await api('DELETE', '/api/assinatura/recorrente'); closeModal(); toast('Renovação automática cancelada.'); const r = await api('GET', '/api/me'); ASSIN = r.assinatura || ASSIN; go(view, true); } catch (e) { toast(e.message); }
+  };
+}
 function abrirAssinatura(plano) {
   if (!window.AgendaProAssinar) return toast('Não foi possível abrir o pagamento. Recarregue a página.');
   const as = ASSIN || PUB?.assinatura;
-  AgendaProAssinar.abrir({ plano, negocio: (S.config || PUB?.config || {}).negocio, slug: SLUG, login: me?.login, token: TOKEN, ajustado: as?.ajustado || as?.promo ? { valor: as.valor, promo: as.promo || null } : null, onPago: () => { ASSIN = null; } });
+  AgendaProAssinar.abrir({ plano, negocio: (S.config || PUB?.config || {}).negocio, slug: SLUG, login: me?.login, token: TOKEN, recorrente: as?.recorrente || null, ajustado: as?.ajustado || as?.promo ? { valor: as.valor, promo: as.promo || null } : null, onPago: () => { ASSIN = null; } });
 }
 function avisoVencimento() {
   if (me?.role !== 'admin' || !ASSIN?.vence) return '';
@@ -1204,7 +1211,8 @@ function vConfig() {
       <div class="card" style="margin-top:12px"><h3>Assinatura</h3>
         <p class="small">${ASSIN?.vence ? `${ASSIN.trial ? 'Teste grátis' : 'Válida'} até <b>${fmtData(ASSIN.vence)}</b>` : 'Ativa'}</p>
         <p class="small" style="margin-top:4px">${ASSIN?.ajustado ? `✨ <b>Plano ajustado</b>: ${brl(ASSIN.valor)}/mês (valor especial)` : ASSIN?.promo ? `🔥 <b>Promoção</b>: ${brl(ASSIN.valor)}/mês por 6 meses${ASSIN.promo.fim ? ` (até ${fmtData(ASSIN.promo.fim)})` : ` para quem assinar até ${fmtData(ASSIN.promo.ate)}`}, depois R$ 39,90` : `Plano mensal: ${brl(ASSIN?.valor || 39.9)}/mês`}</p>
-        <div class="acts" style="margin-top:10px"><button class="btn sm" onclick="abrirAssinatura()">💳 ${ASSIN?.trial ? 'Assinar' : 'Renovar'} com Pix</button>${ASSIN?.ajustado || ASSIN?.promo ? '' : `<button class="btn ghost sm" onclick="abrirAssinatura('anual')">Plano anual −${window.AgendaProAssinar ? AgendaProAssinar.desconto : 16}%</button>`}</div>
+        ${ASSIN?.recorrente ? `<p class="small" style="margin-top:6px;color:var(--ok,#3fbf8a)">🔁 <b>Renovação automática no cartão ativa</b> · ${brl(ASSIN.recorrente.valor)}/mês. O acesso renova sozinho a cada cobrança.</p>` : ''}
+        <div class="acts" style="margin-top:10px"><button class="btn sm" onclick="abrirAssinatura()">💳 ${ASSIN?.trial ? 'Assinar' : 'Renovar'} (Pix ou cartão)</button>${ASSIN?.recorrente ? `<button class="btn ghost sm" onclick="cancelarRecorrente()">Cancelar renovação automática</button>` : ''}${ASSIN?.ajustado || ASSIN?.promo ? '' : `<button class="btn ghost sm" onclick="abrirAssinatura('anual')">Plano anual −${window.AgendaProAssinar ? AgendaProAssinar.desconto : 16}%</button>`}</div>
         <p class="small" style="margin-top:8px">${PUB.suporte ? `<a style="color:var(--ac)" target="_blank" rel="noopener" href="https://wa.me/${PUB.suporte}">Falar com o suporte</a>` : ''}</p>
       </div>
       <div class="card" style="margin-top:12px"><h3>📲 Instalar o app</h3>

@@ -394,7 +394,7 @@ const valorPlano = E => ehAjustado(E) ? Number(E.meta.valor) : emPromo(E) ? Numb
 function assinaturaInfo(E) {
   const v = valorPlano(E), aj = ehAjustado(E), pr = emPromo(E);
   return { vence: E.meta.vence || '', trial: !!E.meta.trial, valor: v, ajustado: aj,
-    promo: pr ? { ate: PROMO.ate, fim: E.meta.promo?.fim || '', garantida: promoGarantida(E) } : null, online: !!ASAAS_KEY };
+    promo: pr ? { ate: PROMO.ate, fim: E.meta.promo?.fim || '', garantida: promoGarantida(E) } : null, online: !!ASAAS_KEY, recorrente: recorrentePub(E.meta.recorrente) };
 }
 
 /* ----- Asaas: cobrança Pix da assinatura com liberação automática -----
@@ -431,40 +431,110 @@ function planoCobranca(E, plano) {
 const NOME_PLANO = { anual: 'Plano anual', promo: 'Promoção (6 meses)', ajustado: 'Plano ajustado', mensal: 'Plano mensal' };
 const cobrancaPub = c => ({ id: c.id, valor: c.valor, plano: c.plano, nomePlano: NOME_PLANO[c.plano] || 'Plano', dias: c.dias, payload: c.payload, url: c.url || '', status: c.status, venc: c.venc });
 // Renova/ativa a assinatura (usado pela Central e pela confirmação automática do Pix)
-function renovarEmpresa(E, dias, promo) {
+function renovarEmpresa(E, dias, promo, ateMin) {
   const base = E.meta.vence && E.meta.vence > hojeSP() ? E.meta.vence : hojeSP();
   if (promo === true && !E.meta.promo && !ehAjustado(E)) E.meta.promo = { valor: PROMO.valor, em: new Date().toISOString() };
   else if (promo === false && E.meta.promo && !E.meta.promo.fim) delete E.meta.promo;
   else if (promo === undefined && promoOferta(E)) garantirPromo(E);
   if (E.meta.promo && !E.meta.promo.fim) E.meta.promo.fim = somaDias(base, PROMO.dias); // 6 meses a partir do 1º período pago
-  E.meta.vence = somaDias(base, dias); E.meta.bloqueado = false; E.meta.trial = false; E.meta.avisos = {}; delete E.meta.pagInformado; delete E.meta.pagPendente;
+  E.meta.vence = ateMin ? (ateMin > base ? ateMin : base) : somaDias(base, dias); E.meta.bloqueado = false; E.meta.trial = false; E.meta.avisos = {}; delete E.meta.pagInformado; delete E.meta.pagPendente;
 }
+function somaMes(data, n = 1) { const [y, m, d] = data.split('-').map(Number), dt = new Date(Date.UTC(y, m - 1 + n, 1)), ult = new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth() + 1, 0)).getUTCDate(); dt.setUTCDate(Math.min(d, ult)); return dt.toISOString().slice(0, 10); }
 async function confirmarPagamento(E, pay) {
   const m = E.meta; m.pagos = m.pagos || [];
-  if (m.pagos.includes(pay.id)) return;
-  m.pagos = [...m.pagos, pay.id].slice(-60);
-  const c = m.cobranca && m.cobranca.id === pay.id ? m.cobranca : null;
-  const dias = c?.dias || (Number(pay.value) >= 300 ? 365 : 30);
-  renovarEmpresa(E, dias, c?.plano === 'anual' ? false : undefined);
+  const chave = pay.installment ? 'inst:' + pay.installment : pay.id; // parcelado: só a 1ª parcela libera o ano
+  if (m.pagos.includes(chave) || m.pagos.includes(pay.id)) return;
+  m.pagos = [...m.pagos, chave].slice(-60);
+  const c = m.cobranca && (m.cobranca.id === pay.id || (pay.installment && m.cobranca.installment === pay.installment)) ? m.cobranca : null;
+  const anual = c ? c.plano === 'anual' : Number(pay.installment ? pay.value * (pay.installmentCount || 1) : pay.value) >= 300;
+  const dias = c?.dias || (anual ? 365 : 30);
+  const recorr = !!pay.subscription && pay.subscription === m.recorrente?.id;
+  let ateMin = '';
+  if (recorr) { // cartão recorrente: acompanha o dia da cobrança do mês (+2 dias de folga)
+    const alvo = somaDias(somaMes(String(pay.dueDate || hojeSP()).slice(0, 10)), 2);
+    const base = m.vence && m.vence > hojeSP() ? m.vence : hojeSP();
+    ateMin = m.trial && somaDias(base, 30) > alvo ? somaDias(base, 30) : alvo;
+  }
+  renovarEmpresa(E, dias, anual ? false : undefined, ateMin);
   if (c) { c.status = 'RECEIVED'; c.pagoEm = new Date().toISOString(); }
-  evento('pago', `✅ Pix confirmado: ${E.config.negocio}`, `${brl(pay.value)} pago pelo Asaas · ${dias} dias liberados automaticamente. Novo vencimento: ${fmtData(m.vence)}.`, m.slug);
+  const forma = pay.billingType === 'CREDIT_CARD' ? (recorr ? 'cartão (renovação automática)' : 'cartão') : 'Pix';
+  evento('pago', `✅ Pagamento confirmado: ${E.config.negocio}`, `${brl(pay.installment ? (c?.valor || pay.value) : pay.value)} no ${forma} pelo Asaas · acesso liberado automaticamente até ${fmtData(m.vence)}.`, m.slug);
+  sincronizarRecorrente(E);
   pushAdmins(E, '✅ Pagamento confirmado', `Obrigado! Seu AgendaPro está liberado até ${fmtData(m.vence)}.`).catch(() => { });
   changed(E); await gravarAgora();
 }
-route('POST', T + '/assinatura/pix', 'admin', async (req, b) => {
-  const E = req.E, m = E.meta, doc = digits(b.doc);
-  if (doc) { if (!docValido(doc)) fail(400, 'CPF ou CNPJ inválido. Confira os números.'); if (m.asaas?.doc !== doc) m.asaas = { doc }; }
-  if (!ASAAS_KEY) fail(503, 'Pagamento online ainda não configurado. Fale com o suporte no WhatsApp.');
-  if (!m.asaas?.doc) return { precisaDoc: true };
-  const pl = planoCobranca(E, String(b.plano || ''));
-  const ant = m.cobranca;
-  if (ant && ant.status === 'PENDING' && ant.plano === pl.plano && Math.abs(ant.valor - pl.valor) < 0.004 && ant.venc >= hojeSP() && ant.payload) return cobrancaPub(ant);
+async function clienteAsaas(E) {
+  const m = E.meta;
   if (!m.asaas.customer) {
     const dono = E.users.find(u => u.role === 'admin'), tel = digits(m.donoTel).replace(/^55(?=\d{10,11}$)/, '');
     const cli = await asaas('POST', '/customers', { name: dono?.nome || E.config.negocio, cpfCnpj: m.asaas.doc, email: /@/.test(m.email || '') ? m.email : undefined, mobilePhone: tel.length >= 10 ? tel : undefined, company: E.config.negocio, externalReference: m.slug, notificationDisabled: true });
     m.asaas.customer = cli.id; changed(E);
   }
-  if (ant && ant.status === 'PENDING') asaas('DELETE', '/payments/' + ant.id).catch(() => { }); // troca de plano: cancela o Pix anterior
+  return m.asaas.customer;
+}
+// Mantém o valor da renovação automática igual ao plano (fim da promoção, plano ajustado…)
+function sincronizarRecorrente(E) {
+  const r = E.meta.recorrente; if (!r || r.status !== 'ACTIVE' || !ASAAS_KEY) return;
+  const v = valorPlano(E); if (Math.abs(Number(r.valor) - v) < 0.004) return;
+  r.valor = v; changed(E);
+  asaas('PUT', '/subscriptions/' + r.id, { value: v, updatePendingPayments: true }).catch(e => console.error('Asaas: não atualizou a assinatura', e.message));
+}
+function docDoBody(E, b) {
+  const doc = digits(b.doc), m = E.meta;
+  if (doc) { if (!docValido(doc)) fail(400, 'CPF ou CNPJ inválido. Confira os números.'); if (m.asaas?.doc !== doc) m.asaas = { doc }; }
+  if (!ASAAS_KEY) fail(503, 'Pagamento online ainda não configurado. Fale com o suporte no WhatsApp.');
+  return !!m.asaas?.doc;
+}
+const recorrentePub = r => r && r.status === 'ACTIVE' ? { ativa: true, valor: r.valor, desde: r.criado } : null;
+// Cartão de crédito: avulso (anual em até 12x) ou renovação automática todo mês. O cartão é digitado na página segura do Asaas.
+route('POST', T + '/assinatura/cartao', 'admin', async (req, b) => {
+  const E = req.E, m = E.meta;
+  if (!docDoBody(E, b)) return { precisaDoc: true };
+  const pl = planoCobranca(E, String(b.plano || ''));
+  const recorrente = !!b.recorrente && pl.plano !== 'anual';
+  const ant = m.cobranca;
+  if (recorrente && m.recorrente?.status === 'ACTIVE') {
+    if (ant && ant.status === 'PENDING' && ant.recorrente && ant.url) return { ...cobrancaPub(ant), recorrente: true };
+    return { jaAtiva: true, recorrente: recorrentePub(m.recorrente) };
+  }
+  const parcelas = pl.plano === 'anual' ? Math.min(Math.max(parseInt(b.parcelas) || 1, 1), 12) : 1;
+  if (ant && ant.status === 'PENDING' && ant.tipo === 'cartao' && !!ant.recorrente === recorrente && ant.plano === pl.plano && (ant.parcelas || 1) === parcelas && Math.abs(ant.valor - pl.valor) < 0.004 && ant.venc >= hojeSP() && ant.url) return { ...cobrancaPub(ant), recorrente };
+  await clienteAsaas(E);
+  if (ant && ant.status === 'PENDING' && !ant.recorrente) asaas('DELETE', '/payments/' + ant.id).catch(() => { });
+  const venc = somaDias(hojeSP(), 1), desc = `AgendaPro Beleza · ${NOME_PLANO[pl.plano]} · ${E.config.negocio}`.slice(0, 500);
+  let pay;
+  if (recorrente) {
+    const sub = await asaas('POST', '/subscriptions', { customer: m.asaas.customer, billingType: 'CREDIT_CARD', value: pl.valor, nextDueDate: hojeSP(), cycle: 'MONTHLY', description: desc + ' · renovação automática', externalReference: 'ap:' + m.slug });
+    m.recorrente = { id: sub.id, valor: pl.valor, status: 'ACTIVE', criado: new Date().toISOString() };
+    const lst = await asaas('GET', `/subscriptions/${sub.id}/payments`);
+    pay = (lst.data || [])[0];
+    if (!pay) fail(502, 'O Asaas ainda está gerando a cobrança. Tente de novo em alguns segundos.');
+  } else {
+    pay = await asaas('POST', '/payments', { customer: m.asaas.customer, billingType: 'CREDIT_CARD', dueDate: venc, description: desc, externalReference: 'ap:' + m.slug,
+      ...(parcelas > 1 ? { installmentCount: parcelas, totalValue: pl.valor } : { value: pl.valor }) });
+  }
+  m.cobranca = { id: pay.id, ...pl, venc: String(pay.dueDate || venc).slice(0, 10), status: 'PENDING', tipo: 'cartao', recorrente, parcelas, installment: pay.installment || '', url: pay.invoiceUrl || '', criado: new Date().toISOString() };
+  m.pagPendente = { plano: pl.plano, em: new Date().toISOString() };
+  changed(E); await gravarAgora();
+  return { ...cobrancaPub(m.cobranca), recorrente };
+});
+async function cancelarRecorrente(E, quem) {
+  const r = E.meta.recorrente; if (!r || r.status !== 'ACTIVE') return;
+  await asaas('DELETE', '/subscriptions/' + r.id);
+  r.status = 'CANCELADA'; r.canceladaEm = new Date().toISOString();
+  const c = E.meta.cobranca; if (c && c.recorrente && c.status === 'PENDING') c.status = 'DELETED';
+  evento('assinatura', `🔁 Renovação automática cancelada: ${E.config.negocio}`, `Cancelada ${quem}. O acesso continua até ${fmtData(E.meta.vence)}.`, E.meta.slug);
+  changed(E); await gravarAgora();
+}
+route('DELETE', T + '/assinatura/recorrente', 'admin', async req => { await cancelarRecorrente(req.E, 'pelo assinante'); return { ok: true }; });
+route('POST', T + '/assinatura/pix', 'admin', async (req, b) => {
+  const E = req.E, m = E.meta;
+  if (!docDoBody(E, b)) return { precisaDoc: true };
+  const pl = planoCobranca(E, String(b.plano || ''));
+  const ant = m.cobranca;
+  if (ant && ant.status === 'PENDING' && ant.tipo !== 'cartao' && ant.plano === pl.plano && Math.abs(ant.valor - pl.valor) < 0.004 && ant.venc >= hojeSP() && ant.payload) return cobrancaPub(ant);
+  await clienteAsaas(E);
+  if (ant && ant.status === 'PENDING' && !ant.recorrente) asaas('DELETE', '/payments/' + ant.id).catch(() => { }); // troca de plano: cancela a cobrança anterior
   const venc = somaDias(hojeSP(), 1);
   const pay = await asaas('POST', '/payments', { customer: m.asaas.customer, billingType: 'PIX', value: pl.valor, dueDate: venc, description: `AgendaPro Beleza · ${NOME_PLANO[pl.plano]} · ${E.config.negocio}`.slice(0, 500), externalReference: 'ap:' + m.slug });
   const qr = await asaas('GET', `/payments/${pay.id}/pixQrCode`);
@@ -490,12 +560,19 @@ route('GET', T + '/assinatura/pix/:id', 'admin', async (req, b, p) => {
 route('POST', '/api/asaas/webhook', null, async (req, b) => {
   if (ASAAS_WH && !igual(String(req.headers['asaas-access-token'] || ''), ASAAS_WH)) fail(401, 'Token inválido.');
   const id = String(b?.payment?.id || ''), ev = String(b?.event || '');
+  if (/^SUBSCRIPTION_(DELETED|INACTIVATED)$/.test(ev) && b.subscription?.id) {
+    const E = Object.values(EMP).find(x => x.meta.recorrente?.id === b.subscription.id);
+    if (E && E.meta.recorrente.status === 'ACTIVE') { E.meta.recorrente.status = 'CANCELADA'; E.meta.recorrente.canceladaEm = new Date().toISOString(); salvar(E); }
+    return { ok: true };
+  }
   if (!id || !/^PAYMENT_(RECEIVED|CONFIRMED)$/.test(ev)) return { ok: true };
-  const E = Object.values(EMP).find(x => x.meta.cobranca?.id === id) || EMP[String(b.payment.externalReference || '').replace(/^ap:/, '')];
+  const P = b.payment || {};
+  const E = Object.values(EMP).find(x => x.meta.cobranca?.id === id || (P.subscription && x.meta.recorrente?.id === P.subscription) || (P.customer && x.meta.asaas?.customer === P.customer))
+    || EMP[String(P.externalReference || '').replace(/^ap:/, '')];
   if (!E) return { ok: true };
-  try { // não confia só no corpo: confere a cobrança direto no Asaas
+  try { // não confia só no corpo: confere a cobrança direto no Asaas e se é deste assinante
     const pay = await asaas('GET', '/payments/' + encodeURIComponent(id));
-    if (PAGO.includes(pay.status) && pay.externalReference === 'ap:' + E.meta.slug) await confirmarPagamento(E, pay);
+    if (PAGO.includes(pay.status) && (pay.customer === E.meta.asaas?.customer || pay.externalReference === 'ap:' + E.meta.slug)) await confirmarPagamento(E, pay);
   } catch (e) { console.error('Webhook Asaas:', e.message); }
   return { ok: true };
 });
@@ -841,7 +918,7 @@ function resumo(E) {
     ultimoUso: E.agendamentos.map(a => a.criadoEm || '').sort().pop()?.slice(0, 10) || '',
     aparelhosPush: E.pushSubs.length, trial: !!E.meta.trial, email: E.meta.email || '', origem: E.meta.origem || '',
     funcionarios: E.users.filter(u => u.role === 'func').length,
-    pagInformado: E.meta.pagInformado || null, pagPendente: E.meta.pagPendente || null, cobranca: E.meta.cobranca ? { valor: E.meta.cobranca.valor, plano: E.meta.cobranca.plano, status: E.meta.cobranca.status, criado: E.meta.cobranca.criado, pagoEm: E.meta.cobranca.pagoEm || '' } : null, msgs: E.meta.msgs || {}, temLogo: !!E.config.empresa?.logo, cnpj: E.config.empresa?.cnpj || ''
+    pagInformado: E.meta.pagInformado || null, pagPendente: E.meta.pagPendente || null, cobranca: E.meta.cobranca ? { valor: E.meta.cobranca.valor, plano: E.meta.cobranca.plano, status: E.meta.cobranca.status, criado: E.meta.cobranca.criado, pagoEm: E.meta.cobranca.pagoEm || '', tipo: E.meta.cobranca.tipo || 'pix' } : null, recorrente: recorrentePub(E.meta.recorrente), msgs: E.meta.msgs || {}, temLogo: !!E.config.empresa?.logo, cnpj: E.config.empresa?.cnpj || ''
   };
 }
 /* ----- modelos de mensagem da Central (boas-vindas e acompanhamento do teste) ----- */
@@ -976,6 +1053,7 @@ route('PUT', '/api/central/empresas/:slug', 'central', async (req, b, p) => {
   if (b.valor !== undefined) {
     const novo = Math.max(0, Math.round(n(b.valor) * 100) / 100), antes = valorPlano(E);
     E.meta.valor = novo;
+    sincronizarRecorrente(E);
     if (Math.abs(valorPlano(E) - antes) > 0.004) pushAdmins(E, ehAjustado(E) ? '💲 Seu plano foi ajustado' : '💲 Valor do plano atualizado', `Sua mensalidade do AgendaPro agora é R$ ${valorPlano(E).toFixed(2).replace('.', ',')}/mês${ehAjustado(E) ? ' (plano ajustado)' : ''}.`).catch(() => { });
   }
   if (b.donoTel !== undefined) E.meta.donoTel = str(b.donoTel, 30);
@@ -994,6 +1072,7 @@ route('PUT', '/api/central/empresas/:slug', 'central', async (req, b, p) => {
   changed(E); if (!(await gravarAgora())) fail(503, ERRO_BANCO);
   return { empresa: resumo(E) };
 });
+route('POST', '/api/central/empresas/:slug/cancelar-recorrente', 'central', async (req, b, p) => { const E = empCentral(p.slug); await cancelarRecorrente(E, 'pela Central'); return { empresa: resumo(E) }; });
 route('POST', '/api/central/empresas/:slug/renovar', 'central', async (req, b, p) => {
   const E = empCentral(p.slug), dias = Math.min(Math.max(parseInt(b.dias) || 30, 1), 3660);
   renovarEmpresa(E, dias, typeof b.promo === 'boolean' ? b.promo : undefined);
@@ -1131,7 +1210,7 @@ const server = http.createServer(async (req, res) => {
         if (r.auth === 'staff' && u.role !== 'admin' && u.role !== 'func') fail(403, 'Acesso restrito à equipe.');
         req.user = u;
       }
-      if (situacao(E) !== 'ativa' && !url.pathname.endsWith('/public') && !/\/assinatura\/pix/.test(url.pathname)) fail(423, situacao(E) === 'vencida' ? 'Assinatura vencida. Fale com o suporte para renovar.' : 'Acesso suspenso. Fale com o suporte.');
+      if (situacao(E) !== 'ativa' && !url.pathname.endsWith('/public') && !/\/assinatura\/(pix|cartao|recorrente)/.test(url.pathname)) fail(423, situacao(E) === 'vencida' ? 'Assinatura vencida. Fale com o suporte para renovar.' : 'Acesso suspenso. Fale com o suporte.');
     }
     const body = ['POST', 'PUT', 'DELETE'].includes(req.method) ? await readBody(req) : {};
     send(res, 200, await r.fn(req, body, params));

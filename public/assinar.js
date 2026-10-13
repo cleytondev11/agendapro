@@ -77,9 +77,20 @@
   .apx-box{background:#120f17;border:1px solid #322b3d;border-radius:14px;padding:14px;margin-top:16px}
   .apx-box p{margin:0 0 8px;font-size:.88rem;color:#cfc7da;line-height:1.45}
   .apx-sec{font-size:.76rem;color:#8f86a0;margin-top:8px;text-align:center}
+  .apx-met{display:grid;grid-template-columns:1fr 1fr;gap:6px;background:#120f17;border:1px solid #322b3d;border-radius:14px;padding:5px;margin-top:16px}
+  .apx-met button{border:0;background:transparent;color:#a89fb5;font:800 .92rem 'Manrope',system-ui,sans-serif;padding:11px;border-radius:10px;cursor:pointer}
+  .apx-met button[aria-pressed="true"]{background:#f4f0f7;color:#1b1722}
+  .apx-op{width:100%;text-align:left;color:inherit;font:inherit;display:flex;gap:11px;align-items:flex-start;border:1.5px solid #322b3d;border-radius:14px;padding:12px 13px;margin-top:10px;cursor:pointer;background:#120f17}
+  .apx-op[aria-pressed="true"]{border-color:#3fbf8a;background:color-mix(in srgb,#3fbf8a 10%,#120f17)}
+  .apx-op .r{flex:none;width:20px;height:20px;border-radius:50%;border:2px solid #5a4f66;margin-top:2px;display:grid;place-items:center}
+  .apx-op[aria-pressed="true"] .r{border-color:#3fbf8a}.apx-op[aria-pressed="true"] .r:after{content:"";width:10px;height:10px;border-radius:50%;background:#3fbf8a}
+  .apx-op b{display:block;font-size:.93rem}.apx-op span{font-size:.8rem;color:#a89fb5;line-height:1.4}
+  .apx-card{background:#4e7cff;color:#fff;margin-top:14px}
+  .apx-bandeiras{display:flex;gap:6px;justify-content:center;margin-top:10px;font-size:.72rem;color:#8f86a0;font-weight:700;letter-spacing:.04em}
+  .apx-ativa{background:color-mix(in srgb,#4e7cff 16%,#120f17);border:1px solid color-mix(in srgb,#4e7cff 45%,#322b3d);border-radius:13px;padding:12px 14px;font-size:.88rem;margin-top:14px;line-height:1.45}
   @media (max-width:420px){.apx{padding:18px}.apx-p .v{font-size:1.15rem}.apx-g2{grid-template-columns:1fr}}
   `;
-  let estilo = false, ctx = {}, plano = 'mensal', cob = null, pollT = null, seq = 0;
+  let estilo = false, ctx = {}, plano = 'mensal', cob = null, pollT = null, seq = 0, metodo = 'pix', recorr = true, parcelas = 1, janela = null;
   function qrSvgDe(txt) {
     try { const q = qrcode(0, 'M'); q.addData(txt); q.make(); return q.createSvgTag({ cellSize: 4, margin: 2, scalable: true }); } catch { return ''; }
   }
@@ -167,7 +178,7 @@
   }
 
   /* ---- Pix gerado pelo Asaas ---- */
-  const apiPix = (path, opt = {}) => fetch(`/api/t/${encodeURIComponent(ctx.slug)}/assinatura/pix${path}`, { ...opt, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + ctx.token } });
+  const apiPix = (path, opt = {}, rota = '/pix') => fetch(`/api/t/${encodeURIComponent(ctx.slug)}/assinatura${rota}${path}`, { ...opt, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + ctx.token } });
   async function gerarPix(doc) {
     const my = ++seq; clearInterval(pollT);
     cob = { carregando: true }; pintarPix();
@@ -191,27 +202,74 @@
       try {
         const r = await apiPix('/' + encodeURIComponent(id)); const j = await r.json();
         if (['RECEIVED', 'CONFIRMED', 'RECEIVED_IN_CASH'].includes(j.status)) { clearInterval(pollT); pago(j); }
-        else if (['OVERDUE', 'DELETED', 'REFUNDED'].includes(j.status)) { clearInterval(pollT); gerarPix(); }
+        else if (['OVERDUE', 'DELETED', 'REFUNDED'].includes(j.status)) { clearInterval(pollT); if (metodo === 'cartao') { cob = null; pintarPix(); } else gerarPix(); }
       } catch { }
     }, 5000);
+  }
+  const parcelaTxt = n => n > 1 ? `${n}x de ${brl(PLANOS.anual.valor / n)}` : 'à vista';
+  async function gerarCartao(doc) {
+    const my = ++seq; clearInterval(pollT);
+    // abre a janela já no clique (evita bloqueio de pop-up) e depois manda para a página do Asaas
+    if (!janela || janela.closed) { try { janela = window.open('', '_blank'); if (janela) janela.document.write('<p style="font:16px system-ui;padding:24px">Abrindo a página segura de pagamento…</p>'); } catch { janela = null; } }
+    cob = { carregando: true, cartao: true }; pintarPix();
+    try {
+      const r = await apiPix('', { method: 'POST', body: JSON.stringify({ plano, doc: doc || undefined, recorrente: plano !== 'anual' && recorr, parcelas: plano === 'anual' ? parcelas : 1 }) }, '/cartao');
+      const j = await r.json().catch(() => ({}));
+      if (my !== seq) return;
+      if (!r.ok) throw Object.assign(new Error(j.erro || 'Não foi possível abrir o pagamento com cartão agora.'), { status: r.status });
+      if (j.precisaDoc) { try { janela && janela.close(); } catch { } janela = null; cob = { precisaDoc: true, cartao: true }; return pintarPix(); }
+      if (j.jaAtiva) { try { janela && janela.close(); } catch { } janela = null; cob = { jaAtiva: true, cartao: true, recorrente: j.recorrente }; return pintarPix(); }
+      cob = { ...j, cartao: true, aberto: true };
+      if (janela && !janela.closed) janela.location.href = j.url; else cob.aberto = false;
+      acompanhar(cob.id);
+    } catch (e) {
+      if (my !== seq) return;
+      try { janela && janela.close(); } catch { } janela = null;
+      cob = { erro: e.message, cartao: true, docErrado: /CPF|CNPJ/i.test(e.message), indisponivel: e.status === 503 };
+    }
+    pintarPix();
+  }
+  function pintarCartao(box, p) {
+    if (!cob) {
+      const mensal = plano !== 'anual';
+      box.innerHTML = (mensal ? `
+        <button type="button" class="apx-op" data-r="1" aria-pressed="${recorr}"><i class="r"></i><div><b>🔁 Renovação automática <span style="color:#3fbf8a;font-size:.75rem">RECOMENDADO</span></b><span>Cobra ${brl(p.valor)} todo mês no cartão e o acesso renova sozinho. Cancele quando quiser.</span></div></button>
+        <button type="button" class="apx-op" data-r="0" aria-pressed="${!recorr}"><i class="r"></i><div><b>Pagar só este mês</b><span>${brl(p.valor)} uma vez, sem renovação automática.</span></div></button>`
+        : `<label class="apx-lbl" for="apxParc">Parcelamento</label><div class="apx-f"><select id="apxParc">${Array.from({ length: 12 }, (_, i) => i + 1).map(n => `<option value="${n}" ${n === parcelas ? 'selected' : ''}>${n === 1 ? `À vista · ${brl(PLANOS.anual.valor)}` : `${parcelaTxt(n)} (total ${brl(PLANOS.anual.valor)})`}</option>`).join('')}</select></div>`) + `
+        <button class="apx-btn apx-card" data-a="cartao">💳 Pagar ${mensal ? brl(p.valor) + (recorr ? '/mês' : '') : parcelaTxt(parcelas)} com cartão</button>
+        <div class="apx-bandeiras">VISA · MASTERCARD · ELO · AMEX · HIPERCARD</div>
+        <div class="apx-sec">🔒 Você digita o cartão na página segura do Asaas. O AgendaPro não vê nem guarda os dados do cartão.</div>`;
+      const sel = box.querySelector('#apxParc'); if (sel) sel.addEventListener('change', () => { parcelas = +sel.value; pintarPix(); });
+      return;
+    }
+    if (cob.carregando) { box.innerHTML = `<div class="apx-box" style="text-align:center"><div class="apx-spin"></div><p style="margin:0">Abrindo a página segura de pagamento…</p></div>`; return; }
+    if (cob.jaAtiva) { box.innerHTML = `<div class="apx-ativa">✅ <b>Renovação automática já está ativa</b> no seu cartão (${brl(cob.recorrente?.valor || p.valor)}/mês). Não precisa pagar agora: a cobrança é feita sozinha todo mês.</div>`; return; }
+    box.innerHTML = `<div class="apx-box" style="text-align:center">
+        <p style="font-size:1rem;color:#f4f0f7"><b>${cob.aberto ? 'Abrimos a página de pagamento numa nova aba.' : 'Toque no botão para abrir a página de pagamento.'}</b></p>
+        <p>Digite os dados do cartão e confirme ${cob.recorrente ? `<b>${brl(cob.valor)}/mês</b> (renovação automática)` : `<b>${cob.parcelas > 1 ? parcelaTxt(cob.parcelas) : brl(cob.valor)}</b>`}. Quando aprovar, o acesso é liberado aqui na hora.</p>
+        <a class="apx-btn apx-card" href="${esc(cob.url)}" target="_blank" rel="noopener">💳 ${cob.aberto ? 'Abrir a página de pagamento de novo' : 'Abrir página de pagamento'}</a></div>
+      <div class="apx-wait" role="status"><i></i>Aguardando a aprovação do cartão…</div>
+      <button class="apx-alt" data-a="outro">Trocar opção de pagamento</button>`;
   }
   function pintarPix() {
     const box = document.getElementById('apxPix'); if (!box) return;
     const p = planoAtual();
+    document.querySelectorAll('#apx [data-m]').forEach(b => b.setAttribute('aria-pressed', b.dataset.m === metodo));
     if (!ctx.slug || !ctx.token) {
       box.innerHTML = `<div class="apx-box"><p>Para gerar o Pix precisamos da sua conta. ${ctx.cadastro ? 'Volte e preencha seus dados.' : 'Entre no seu painel e toque em <b>Assinar</b>.'}</p>
         ${ctx.cadastro ? '<button class="apx-btn apx-ok" style="margin-top:6px" data-a="voltar">← Voltar para os dados</button>' : ''}<button class="apx-btn apx-gh" data-a="ajuda">💬 Falar no WhatsApp</button></div>`;
       return;
     }
+    if (metodo === 'cartao' && !(cob && (cob.precisaDoc || cob.docErrado || (cob.erro && !cob.docErrado)))) return pintarCartao(box, p);
     if (!cob || cob.carregando) { box.innerHTML = `<div class="apx-qr"><div class="q"><div class="apx-load"><div><div class="apx-spin"></div>Gerando seu Pix…</div></div></div><div class="val">${brl(p.valor)}</div></div>`; return; }
     if (cob.precisaDoc || cob.docErrado) {
-      box.innerHTML = `<form class="apx-box apx-f" id="apxDocF" novalidate><p><b>Só falta seu CPF ou CNPJ</b> para emitir a cobrança Pix de <b>${brl(p.valor)}</b>.</p>
+      box.innerHTML = `<form class="apx-box apx-f" id="apxDocF" novalidate><p><b>Só falta seu CPF ou CNPJ</b> para emitir a cobrança${metodo === 'cartao' ? '' : ' Pix'} de <b>${brl(p.valor)}</b>.</p>
         <input id="apxDoc2" name="doc" inputmode="numeric" placeholder="000.000.000-00" autocomplete="off">
         <div class="apx-err">${cob.docErrado ? esc(cob.erro) : ''}</div>
-        <button class="apx-btn apx-ok" style="margin-top:6px" type="submit">Gerar Pix</button>
+        <button class="apx-btn apx-ok" style="margin-top:6px" type="submit">${metodo === 'cartao' ? 'Continuar para o cartão' : 'Gerar Pix'}</button>
         <div class="apx-sec">🔒 Usado só para emitir a cobrança. Não aparece para ninguém.</div></form>`;
       const inp = box.querySelector('#apxDoc2'); mascaraDoc(inp);
-      box.querySelector('#apxDocF').addEventListener('submit', ev => { ev.preventDefault(); const d = inp.value.replace(/\D/g, ''); if (![11, 14].includes(d.length)) { box.querySelector('.apx-err').textContent = 'Informe 11 números (CPF) ou 14 (CNPJ).'; return; } gerarPix(d); });
+      box.querySelector('#apxDocF').addEventListener('submit', ev => { ev.preventDefault(); const d = inp.value.replace(/\D/g, ''); if (![11, 14].includes(d.length)) { box.querySelector('.apx-err').textContent = 'Informe 11 números (CPF) ou 14 (CNPJ).'; return; } metodo === 'cartao' ? gerarCartao(d) : gerarPix(d); });
       setTimeout(() => inp.focus(), 50);
       return;
     }
@@ -237,13 +295,16 @@
       <div class="apx-h"><h3>Assinar o AgendaPro</h3><button class="apx-x" data-a="fechar" aria-label="Fechar">✕</button></div>
       ${passos(2)}
       ${ctx.cadastrado ? `<div class="apx-okbox">✅ ${ctx.existente ? 'Encontramos a sua conta' : 'Conta criada'}! Usuário: <b>${esc(ctx.login)}</b><br>${ctx.existente ? '' : 'Você já pode usar por 3 dias. '}<a href="/${esc(ctx.slug)}" target="_blank" rel="noopener">Abrir meu painel ↗</a></div>` : ''}
-      <p class="apx-sub">${ctx.negocio ? esc(ctx.negocio) + ' · ' : ''}Pague com Pix: a liberação é automática.</p>
+      <p class="apx-sub">${ctx.negocio ? esc(ctx.negocio) + ' · ' : ''}Pague com Pix ou cartão: a liberação é automática.</p>
+      ${ctx.recorrente ? `<div class="apx-ativa">🔁 Sua <b>renovação automática no cartão</b> está ativa (${brl(Number(ctx.recorrente.valor))}/mês). Não precisa pagar agora.</div>` : ''}
       ${cardsDoCtx()}
+      <div class="apx-met" role="group" aria-label="Forma de pagamento"><button type="button" data-m="pix" aria-pressed="${metodo === 'pix'}">⚡ Pix</button><button type="button" data-m="cartao" aria-pressed="${metodo === 'cartao'}">💳 Cartão</button></div>
       <div id="apxPix"></div>
       <button class="apx-btn apx-gh" style="margin-top:16px" data-a="fechar">Pagar depois</button>
       <button class="apx-alt" data-a="ajuda">Problema com o pagamento? Falar no WhatsApp</button>
     </div>`;
-    if (ctx.slug && ctx.token) gerarPix(); else pintarPix();
+    cob = null;
+    if (ctx.slug && ctx.token && metodo === 'pix') gerarPix(); else pintarPix();
   }
   function pago(j) {
     seq++; const p = planoAtual();
@@ -252,7 +313,7 @@
     document.querySelector('#apx .apx').innerHTML = `${passos(3)}<div class="apx-done">
       <div class="c">✓</div><h3 style="margin:0;font-family:'Fraunces',Georgia,serif;font-size:1.4rem">Pagamento confirmado!</h3>
       <p>Obrigado! Seu AgendaPro está liberado${j.vence ? ` até <b>${fmtData(j.vence)}</b>` : ''}.</p>
-      <p style="font-size:.85rem;color:#a89fb5">${esc(p.nome)} · ${brl(cob?.valor || p.valor)}</p>
+      <p style="font-size:.85rem;color:#a89fb5">${esc(p.nome)} · ${brl(cob?.valor || p.valor)}${cob?.recorrente ? ' · 🔁 renova sozinho todo mês no cartão' : ''}</p>
       ${ctx.cadastro && ctx.slug ? `<a class="apx-btn apx-ok" href="/${esc(ctx.slug)}">Entrar no meu painel</a>` : `<button class="apx-btn apx-ok" data-a="recarregar">Continuar</button>`}
     </div>`;
   }
@@ -264,7 +325,7 @@
     const a = document.createElement('a'); a.href = `https://wa.me/${WHATS}?text=${encodeURIComponent(msg)}`; a.target = '_blank'; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove();
   }
   function abrir(opts = {}) {
-    ctx = opts; cob = null; plano = opts.ajustado ? 'ajustado' : opts.plano === 'anual' ? 'anual' : promoAberta() ? 'promo' : 'mensal';
+    ctx = opts; cob = null; metodo = 'pix'; recorr = true; parcelas = 1; janela = null; plano = opts.ajustado ? 'ajustado' : opts.plano === 'anual' ? 'anual' : promoAberta() ? 'promo' : 'mensal';
     if (!estilo) { const s = document.createElement('style'); s.textContent = css; document.head.appendChild(s); estilo = true; }
     fechar();
     const bg = document.createElement('div'); bg.id = 'apx'; bg.className = 'apx-bg';
@@ -277,10 +338,16 @@
         if (document.getElementById('apxForm')) { ctx.dados = Object.fromEntries(new FormData(document.getElementById('apxForm'))); delete ctx.dados.senha; return renderCadastro(); }
         return render();
       }
+      const mt = e.target.closest('[data-m]');
+      if (mt) { if (mt.dataset.m !== metodo) { metodo = mt.dataset.m; seq++; clearInterval(pollT); cob = null; if (!ctx.slug || !ctx.token) return pintarPix(); metodo === 'pix' ? gerarPix() : pintarPix(); } return; }
+      const rr = e.target.closest('[data-r]');
+      if (rr) { recorr = rr.dataset.r === '1'; return pintarPix(); }
       const a = e.target.closest('[data-a]'); if (!a) return;
       if (a.dataset.a === 'fechar') fechar();
       else if (a.dataset.a === 'cc') copiar(cob?.payload || '', a);
-      else if (a.dataset.a === 'gerar') gerarPix();
+      else if (a.dataset.a === 'gerar') metodo === 'cartao' ? (cob = null, pintarPix()) : gerarPix();
+      else if (a.dataset.a === 'cartao') gerarCartao();
+      else if (a.dataset.a === 'outro') { seq++; clearInterval(pollT); cob = null; pintarPix(); }
       else if (a.dataset.a === 'ajuda') ajuda();
       else if (a.dataset.a === 'voltar') renderCadastro();
       else if (a.dataset.a === 'recarregar') { fechar(); location.reload(); }
