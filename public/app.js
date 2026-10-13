@@ -367,7 +367,7 @@ function shell(title, actions, body) {
 function abrirAssinatura(plano) {
   if (!window.AgendaProAssinar) return toast('Não foi possível abrir o pagamento. Recarregue a página.');
   const as = ASSIN || PUB?.assinatura;
-  AgendaProAssinar.abrir({ plano, negocio: (S.config || PUB?.config || {}).negocio, slug: SLUG, login: me?.login, ajustado: (as?.ajustado || as?.promo) && as.pix ? { valor: as.valor, pix: as.pix, promo: as.promo || null } : null });
+  AgendaProAssinar.abrir({ plano, negocio: (S.config || PUB?.config || {}).negocio, slug: SLUG, login: me?.login, token: TOKEN, ajustado: as?.ajustado || as?.promo ? { valor: as.valor, promo: as.promo || null } : null, onPago: () => { ASSIN = null; } });
 }
 function avisoVencimento() {
   if (me?.role !== 'admin' || !ASSIN?.vence) return '';

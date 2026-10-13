@@ -381,7 +381,6 @@ function pixDoAgendamento(E, a) {
 const comPix = (E, a) => { const pix = pixDoAgendamento(E, a); return pix ? { ...a, pix } : a; };
 
 /* ----- plano ajustado (valor especial definido na Central) ----- */
-const PIX_ASSIN = { chave: process.env.PIX_CHAVE || '7e158db6-1929-40ae-86d0-7484c64a9c84', nome: process.env.PIX_NOME || 'Cleyton de Souza Santos', cidade: process.env.PIX_CIDADE || 'SAO PAULO' };
 const ehAjustado = E => Number(E.meta.valor) > 0 && Math.abs(Number(E.meta.valor) - VALOR_PADRAO) > 0.004;
 /* ----- promoção de lançamento: quem assinar até PROMO.ate paga PROMO.valor por PROMO.dias ----- */
 const PROMO = { ate: process.env.PROMO_ATE || '2026-10-16', valor: Number(process.env.PROMO_VALOR) || 19.99, dias: 180 };
@@ -395,10 +394,112 @@ const valorPlano = E => ehAjustado(E) ? Number(E.meta.valor) : emPromo(E) ? Numb
 function assinaturaInfo(E) {
   const v = valorPlano(E), aj = ehAjustado(E), pr = emPromo(E);
   return { vence: E.meta.vence || '', trial: !!E.meta.trial, valor: v, ajustado: aj,
-    promo: pr ? { ate: PROMO.ate, fim: E.meta.promo?.fim || '', garantida: promoGarantida(E) } : null,
-    pix: aj || pr ? brCode(PIX_ASSIN.chave, PIX_ASSIN.nome, PIX_ASSIN.cidade, v, (pr ? 'PR' : 'AJ') + E.meta.slug.replace(/[^a-z0-9]/gi, '').slice(0, 20)) : '' };
+    promo: pr ? { ate: PROMO.ate, fim: E.meta.promo?.fim || '', garantida: promoGarantida(E) } : null, online: !!ASAAS_KEY };
 }
-route('GET', '/api/promo', null, () => ({ aberta: promoAberta(), ate: PROMO.ate, valor: PROMO.valor, dias: PROMO.dias, padrao: VALOR_PADRAO }));
+
+/* ----- Asaas: cobrança Pix da assinatura com liberação automática -----
+   Render → Environment: ASAAS_API_KEY (obrigatória) e ASAAS_WEBHOOK_TOKEN (opcional, o mesmo cadastrado no webhook do Asaas). */
+const ASAAS_KEY = String(process.env.ASAAS_API_KEY || '').trim();
+const ASAAS_URL = String(process.env.ASAAS_URL || (/_hmlg_/.test(ASAAS_KEY) ? 'https://api-sandbox.asaas.com/v3' : 'https://api.asaas.com/v3')).replace(/\/$/, '');
+const ASAAS_WH = String(process.env.ASAAS_WEBHOOK_TOKEN || '').trim();
+const PAGO = ['RECEIVED', 'CONFIRMED', 'RECEIVED_IN_CASH'];
+async function asaas(method, path, body) {
+  if (!ASAAS_KEY) fail(503, 'Pagamento online ainda não configurado. Fale com o suporte no WhatsApp.');
+  let r, j;
+  try {
+    r = await fetch(ASAAS_URL + path, { method, headers: { 'Content-Type': 'application/json', 'User-Agent': 'AgendaProBeleza/1.0', access_token: ASAAS_KEY }, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(15000) });
+    j = await r.json().catch(() => ({}));
+  } catch (e) { console.error('Asaas indisponível:', e.message); fail(502, 'Não foi possível falar com o sistema de pagamento. Tente de novo em instantes.'); }
+  if (!r.ok) {
+    const msg = j?.errors?.[0]?.description || 'Erro no sistema de pagamento.';
+    console.error('Asaas', r.status, method, path, msg);
+    fail(r.status === 401 || r.status === 403 ? 503 : 400, r.status === 401 ? 'Pagamento online com problema de configuração. Fale com o suporte.' : msg);
+  }
+  return j;
+}
+function docValido(d) {
+  d = digits(d); if (/^(\d)\1+$/.test(d)) return false;
+  if (d.length === 11) { const dv = n => { let s = 0; for (let i = 0; i < n; i++) s += +d[i] * (n + 1 - i); return s * 10 % 11 % 10; }; return dv(9) === +d[9] && dv(10) === +d[10]; }
+  if (d.length === 14) { const dv = n => { let s = 0, w = n - 7; for (let i = 0; i < n; i++) { s += +d[i] * w--; if (w < 2) w = 9; } const r = s % 11; return r < 2 ? 0 : 11 - r; }; return dv(12) === +d[12] && dv(13) === +d[13]; }
+  return false;
+}
+function planoCobranca(E, plano) {
+  if (plano === 'anual' && !ehAjustado(E)) return { plano: 'anual', valor: 399.9, dias: 365 };
+  if (plano === 'promo') garantirPromo(E);
+  return { plano: ehAjustado(E) ? 'ajustado' : emPromo(E) ? 'promo' : 'mensal', valor: valorPlano(E), dias: 30 };
+}
+const NOME_PLANO = { anual: 'Plano anual', promo: 'Promoção (6 meses)', ajustado: 'Plano ajustado', mensal: 'Plano mensal' };
+const cobrancaPub = c => ({ id: c.id, valor: c.valor, plano: c.plano, nomePlano: NOME_PLANO[c.plano] || 'Plano', dias: c.dias, payload: c.payload, url: c.url || '', status: c.status, venc: c.venc });
+// Renova/ativa a assinatura (usado pela Central e pela confirmação automática do Pix)
+function renovarEmpresa(E, dias, promo) {
+  const base = E.meta.vence && E.meta.vence > hojeSP() ? E.meta.vence : hojeSP();
+  if (promo === true && !E.meta.promo && !ehAjustado(E)) E.meta.promo = { valor: PROMO.valor, em: new Date().toISOString() };
+  else if (promo === false && E.meta.promo && !E.meta.promo.fim) delete E.meta.promo;
+  else if (promo === undefined && promoOferta(E)) garantirPromo(E);
+  if (E.meta.promo && !E.meta.promo.fim) E.meta.promo.fim = somaDias(base, PROMO.dias); // 6 meses a partir do 1º período pago
+  E.meta.vence = somaDias(base, dias); E.meta.bloqueado = false; E.meta.trial = false; E.meta.avisos = {}; delete E.meta.pagInformado; delete E.meta.pagPendente;
+}
+async function confirmarPagamento(E, pay) {
+  const m = E.meta; m.pagos = m.pagos || [];
+  if (m.pagos.includes(pay.id)) return;
+  m.pagos = [...m.pagos, pay.id].slice(-60);
+  const c = m.cobranca && m.cobranca.id === pay.id ? m.cobranca : null;
+  const dias = c?.dias || (Number(pay.value) >= 300 ? 365 : 30);
+  renovarEmpresa(E, dias, c?.plano === 'anual' ? false : undefined);
+  if (c) { c.status = 'RECEIVED'; c.pagoEm = new Date().toISOString(); }
+  evento('pago', `✅ Pix confirmado: ${E.config.negocio}`, `${brl(pay.value)} pago pelo Asaas · ${dias} dias liberados automaticamente. Novo vencimento: ${fmtData(m.vence)}.`, m.slug);
+  pushAdmins(E, '✅ Pagamento confirmado', `Obrigado! Seu AgendaPro está liberado até ${fmtData(m.vence)}.`).catch(() => { });
+  changed(E); await gravarAgora();
+}
+route('POST', T + '/assinatura/pix', 'admin', async (req, b) => {
+  const E = req.E, m = E.meta, doc = digits(b.doc);
+  if (doc) { if (!docValido(doc)) fail(400, 'CPF ou CNPJ inválido. Confira os números.'); if (m.asaas?.doc !== doc) m.asaas = { doc }; }
+  if (!ASAAS_KEY) fail(503, 'Pagamento online ainda não configurado. Fale com o suporte no WhatsApp.');
+  if (!m.asaas?.doc) return { precisaDoc: true };
+  const pl = planoCobranca(E, String(b.plano || ''));
+  const ant = m.cobranca;
+  if (ant && ant.status === 'PENDING' && ant.plano === pl.plano && Math.abs(ant.valor - pl.valor) < 0.004 && ant.venc >= hojeSP() && ant.payload) return cobrancaPub(ant);
+  if (!m.asaas.customer) {
+    const dono = E.users.find(u => u.role === 'admin'), tel = digits(m.donoTel).replace(/^55(?=\d{10,11}$)/, '');
+    const cli = await asaas('POST', '/customers', { name: dono?.nome || E.config.negocio, cpfCnpj: m.asaas.doc, email: /@/.test(m.email || '') ? m.email : undefined, mobilePhone: tel.length >= 10 ? tel : undefined, company: E.config.negocio, externalReference: m.slug, notificationDisabled: true });
+    m.asaas.customer = cli.id; changed(E);
+  }
+  if (ant && ant.status === 'PENDING') asaas('DELETE', '/payments/' + ant.id).catch(() => { }); // troca de plano: cancela o Pix anterior
+  const venc = somaDias(hojeSP(), 1);
+  const pay = await asaas('POST', '/payments', { customer: m.asaas.customer, billingType: 'PIX', value: pl.valor, dueDate: venc, description: `AgendaPro Beleza · ${NOME_PLANO[pl.plano]} · ${E.config.negocio}`.slice(0, 500), externalReference: 'ap:' + m.slug });
+  const qr = await asaas('GET', `/payments/${pay.id}/pixQrCode`);
+  m.cobranca = { id: pay.id, ...pl, venc, status: 'PENDING', payload: qr.payload, url: pay.invoiceUrl || '', criado: new Date().toISOString() };
+  m.pagPendente = { plano: pl.plano, em: new Date().toISOString() };
+  changed(E); await gravarAgora();
+  return cobrancaPub(m.cobranca);
+});
+route('GET', T + '/assinatura/pix/:id', 'admin', async (req, b, p) => {
+  const E = req.E, c = E.meta.cobranca;
+  if (!c || c.id !== p.id) fail(404, 'Cobrança não encontrada.');
+  if (c.status === 'PENDING' && Date.now() - (c.check || 0) > 4000) {
+    c.check = Date.now();
+    try {
+      const pay = await asaas('GET', '/payments/' + encodeURIComponent(c.id));
+      if (PAGO.includes(pay.status)) await confirmarPagamento(E, pay);
+      else if (pay.status && pay.status !== 'PENDING') { c.status = pay.status; salvar(E); }
+    } catch { }
+  }
+  return { status: c.status, vence: E.meta.vence || '', situacao: situacao(E) };
+});
+// Webhook do Asaas (Configurações → Integrações → Webhooks): .../api/asaas/webhook
+route('POST', '/api/asaas/webhook', null, async (req, b) => {
+  if (ASAAS_WH && !igual(String(req.headers['asaas-access-token'] || ''), ASAAS_WH)) fail(401, 'Token inválido.');
+  const id = String(b?.payment?.id || ''), ev = String(b?.event || '');
+  if (!id || !/^PAYMENT_(RECEIVED|CONFIRMED)$/.test(ev)) return { ok: true };
+  const E = Object.values(EMP).find(x => x.meta.cobranca?.id === id) || EMP[String(b.payment.externalReference || '').replace(/^ap:/, '')];
+  if (!E) return { ok: true };
+  try { // não confia só no corpo: confere a cobrança direto no Asaas
+    const pay = await asaas('GET', '/payments/' + encodeURIComponent(id));
+    if (PAGO.includes(pay.status) && pay.externalReference === 'ap:' + E.meta.slug) await confirmarPagamento(E, pay);
+  } catch (e) { console.error('Webhook Asaas:', e.message); }
+  return { ok: true };
+});
+route('GET', '/api/promo', null, () => ({ aberta: promoAberta(), ate: PROMO.ate, valor: PROMO.valor, dias: PROMO.dias, padrao: VALOR_PADRAO, online: !!ASAAS_KEY }));
 
 /* ----- empresa: público ----- */
 route('GET', T + '/public', 'empresa', req => {
@@ -740,7 +841,7 @@ function resumo(E) {
     ultimoUso: E.agendamentos.map(a => a.criadoEm || '').sort().pop()?.slice(0, 10) || '',
     aparelhosPush: E.pushSubs.length, trial: !!E.meta.trial, email: E.meta.email || '', origem: E.meta.origem || '',
     funcionarios: E.users.filter(u => u.role === 'func').length,
-    pagInformado: E.meta.pagInformado || null, pagPendente: E.meta.pagPendente || null, msgs: E.meta.msgs || {}, temLogo: !!E.config.empresa?.logo, cnpj: E.config.empresa?.cnpj || ''
+    pagInformado: E.meta.pagInformado || null, pagPendente: E.meta.pagPendente || null, cobranca: E.meta.cobranca ? { valor: E.meta.cobranca.valor, plano: E.meta.cobranca.plano, status: E.meta.cobranca.status, criado: E.meta.cobranca.criado, pagoEm: E.meta.cobranca.pagoEm || '' } : null, msgs: E.meta.msgs || {}, temLogo: !!E.config.empresa?.logo, cnpj: E.config.empresa?.cnpj || ''
   };
 }
 /* ----- modelos de mensagem da Central (boas-vindas e acompanhamento do teste) ----- */
@@ -820,6 +921,7 @@ route('POST', '/api/teste', null, async (req, b) => {
   if (whats.length < 10 || whats.length > 13) fail(400, 'Informe um WhatsApp com DDD.');
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) || !LOGIN_RE.test(email)) fail(400, 'Informe um e-mail válido.');
   if (String(b.senha || '').length < 6) fail(400, 'Crie uma senha com pelo menos 6 caracteres.');
+  const doc = digits(b.doc); if (doc && !docValido(doc)) fail(400, 'CPF ou CNPJ inválido. Confira os números.');
   const tel = whats.replace(/^55(?=\d{10,11}$)/, '');
   const ja = Object.values(EMP).find(E => E.meta.email === email || digits(E.meta.donoTel).replace(/^55(?=\d{10,11}$)/, '') === tel || E.users.some(u => u.role === 'admin' && u.login === email));
   const assinar = ['mensal', 'anual', 'promo'].includes(b.assinar) ? b.assinar : '';
@@ -827,6 +929,7 @@ route('POST', '/api/teste', null, async (req, b) => {
     const dono = ja.users.find(u => u.role === 'admin');
     if (dono && dono.login === email && checkPw(b.senha, dono.senha)) {
       ja.meta.pagPendente = { plano: assinar, em: new Date().toISOString() }; if (assinar === 'promo') garantirPromo(ja);
+      if (doc && ja.meta.asaas?.doc !== doc) ja.meta.asaas = { doc };
       const token = novaSessao(ja.sessions, dono.id); salvar(ja);
       evento('assinatura', `🛒 Quer assinar: ${ja.config.negocio}`, `Plano ${assinar}. Conta já existente (${email}). Aguardando o Pix.`, ja.meta.slug);
       return { slug: ja.meta.slug, token, login: email, vence: ja.meta.vence, existente: true };
@@ -839,7 +942,9 @@ route('POST', '/api/teste', null, async (req, b) => {
   cadastrosIp.set(req.ip, [...recentes, Date.now()]);
   const vence = somaDias(hojeSP(), DIAS_TESTE);
   const E = await criarEmpresa({ negocio: loja, nicho, login: email, senha: b.senha, dono: nome, donoTel: str(b.whatsapp, 30), email, vence, valor: VALOR_PADRAO, trial: true, obs: assinar ? `Assinatura pelo site (plano ${assinar}) · aguardando Pix` : 'Teste grátis pelo site' }, { origem: 'site', ...(assinar ? { pagPendente: { plano: assinar, em: new Date().toISOString() } } : {}) });
-  if (assinar === 'promo') { garantirPromo(E); salvar(E); }
+  if (assinar === 'promo') garantirPromo(E);
+  if (doc) E.meta.asaas = { doc };
+  if (assinar || doc) salvar(E);
   META.testesUsados.push(email, tel); marcar('meta');
   const dono = E.users.find(u => u.role === 'admin');
   const token = novaSessao(E.sessions, dono.id); salvar(E);
@@ -891,12 +996,7 @@ route('PUT', '/api/central/empresas/:slug', 'central', async (req, b, p) => {
 });
 route('POST', '/api/central/empresas/:slug/renovar', 'central', async (req, b, p) => {
   const E = empCentral(p.slug), dias = Math.min(Math.max(parseInt(b.dias) || 30, 1), 3660);
-  const base = E.meta.vence && E.meta.vence > hojeSP() ? E.meta.vence : hojeSP();
-  if (b.promo === true && !E.meta.promo && !ehAjustado(E)) E.meta.promo = { valor: PROMO.valor, em: new Date().toISOString() };
-  else if (b.promo === false && E.meta.promo && !E.meta.promo.fim) delete E.meta.promo;
-  else if (b.promo === undefined && promoOferta(E)) garantirPromo(E);
-  if (E.meta.promo && !E.meta.promo.fim) E.meta.promo.fim = somaDias(base, PROMO.dias); // 6 meses a partir do 1º período pago
-  E.meta.vence = somaDias(base, dias); E.meta.bloqueado = false; E.meta.trial = false; E.meta.avisos = {}; delete E.meta.pagInformado; delete E.meta.pagPendente;
+  renovarEmpresa(E, dias, typeof b.promo === 'boolean' ? b.promo : undefined);
   changed(E); if (!(await gravarAgora())) fail(503, ERRO_BANCO);
   return { empresa: resumo(E) };
 });
@@ -1031,7 +1131,7 @@ const server = http.createServer(async (req, res) => {
         if (r.auth === 'staff' && u.role !== 'admin' && u.role !== 'func') fail(403, 'Acesso restrito à equipe.');
         req.user = u;
       }
-      if (situacao(E) !== 'ativa' && !url.pathname.endsWith('/public')) fail(423, situacao(E) === 'vencida' ? 'Assinatura vencida. Fale com o suporte para renovar.' : 'Acesso suspenso. Fale com o suporte.');
+      if (situacao(E) !== 'ativa' && !url.pathname.endsWith('/public') && !/\/assinatura\/pix/.test(url.pathname)) fail(423, situacao(E) === 'vencida' ? 'Assinatura vencida. Fale com o suporte para renovar.' : 'Acesso suspenso. Fale com o suporte.');
     }
     const body = ['POST', 'PUT', 'DELETE'].includes(req.method) ? await readBody(req) : {};
     send(res, 200, await r.fn(req, body, params));
