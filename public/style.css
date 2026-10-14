@@ -408,3 +408,47 @@ h4.sec{font-family:var(--disp);font-size:1rem;margin:20px 0 0;padding-top:14px;b
 .ass-faq p{margin-top:6px}
 #assBox .card{margin-bottom:12px}
 .ass-h .grow,.ass-fp .grow{flex:1;min-width:0}
+
+/* ---- Loja online ---- */
+.loja-hero{display:flex;align-items:center;gap:14px;flex-wrap:wrap;border-radius:18px;padding:16px 18px;margin-bottom:12px;background:var(--card);border:1px solid var(--line)}
+.loja-hero.on{background:linear-gradient(110deg,color-mix(in srgb,var(--ok) 22%,var(--card)),var(--card));border-color:color-mix(in srgb,var(--ok) 45%,var(--line))}
+.loja-hero .grow{flex:1;min-width:200px}
+.lh-t{font-weight:800;font-size:1.05rem}
+.loja-link{display:flex;gap:8px;margin-top:8px}
+.loja-link input{flex:1;min-width:0;font:600 .85rem ui-monospace,monospace}
+.loja-aviso{margin-top:10px;padding:10px 12px;border-radius:12px;background:color-mix(in srgb,var(--warn) 14%,transparent);border:1px solid color-mix(in srgb,var(--warn) 40%,transparent);font-size:.86rem}
+.loja-aviso a{color:var(--ac)}
+.loja-tabs{display:flex;gap:6px;overflow-x:auto;margin-bottom:6px}
+.loja-tabs button{flex:none;border:1px solid var(--line);background:transparent;color:var(--mut);border-radius:99px;padding:8px 14px;font:700 .86rem var(--font)}
+.loja-tabs button.on{background:var(--ac);border-color:var(--ac);color:#fff}
+.loja-tabs button span:not(:empty){margin-left:6px;background:#fff;color:var(--ac);border-radius:99px;padding:0 7px;font-size:.75rem}
+.loja-tabs button:not(.on) span:not(:empty){background:var(--ac);color:#fff}
+.ped{border-top:1px solid var(--line);padding:14px 0}
+.ped:first-child{border-top:0}
+.ped-h{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.ped-it{margin-top:8px;background:color-mix(in srgb,var(--line) 35%,transparent);border-radius:12px;padding:8px 12px;font-size:.88rem}
+.ped-it div{display:flex;justify-content:space-between;gap:8px;padding:2px 0}
+.ped-it .t{font-weight:800;border-top:1px dashed var(--line);margin-top:4px;padding-top:6px}
+.pill.ok{background:color-mix(in srgb,var(--ok) 18%,transparent);color:var(--ok)}
+.pill.warn{background:color-mix(in srgb,var(--warn) 18%,transparent);color:var(--warn)}
+.pill.bad{background:color-mix(in srgb,var(--bad) 18%,transparent);color:var(--bad)}
+.loja-prods{margin-top:8px}
+.lp{display:flex;align-items:center;gap:12px;padding:9px 0;border-top:1px solid var(--line)}
+.lp:first-child{border-top:0}
+.lp.off{opacity:.55}
+.lp .th{flex:none;width:46px;height:46px;border-radius:12px;background:color-mix(in srgb,var(--ac) 14%,transparent);display:grid;place-items:center;overflow:hidden}
+.lp .th img{width:100%;height:100%;object-fit:cover}
+.lp .grow{flex:1;min-width:0}
+.sw{position:relative;flex:none;width:44px;height:26px}
+.sw input{opacity:0;width:0;height:0;position:absolute}
+.sw i{position:absolute;inset:0;border-radius:99px;background:var(--line);transition:.2s;cursor:pointer}
+.sw i:after{content:"";position:absolute;width:20px;height:20px;border-radius:50%;background:#fff;top:3px;left:3px;transition:.2s}
+.sw input:checked+i{background:var(--ok)}
+.sw input:checked+i:after{left:21px}
+label.chk{display:flex;align-items:center;gap:10px;margin-top:12px;font-weight:600;cursor:pointer}
+label.chk input{width:18px;height:18px;flex:none;accent-color:var(--ac)}
+.prod-loja{margin-top:14px;border:1px solid var(--line);border-radius:14px;padding:10px 12px}
+.prod-loja summary{cursor:pointer;font-weight:800}
+.foto-up{display:flex;gap:12px;align-items:center;margin-top:12px}
+.foto-prev{flex:none;width:76px;height:76px;border-radius:14px;background:color-mix(in srgb,var(--ac) 14%,transparent);display:grid;place-items:center;font-size:26px;overflow:hidden}
+.foto-prev img{width:100%;height:100%;object-fit:cover}

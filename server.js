@@ -29,7 +29,7 @@ const EMP = {};
 let pool;
 const INICIO = new Date().toISOString();
 
-const blankEmp = () => ({ meta: {}, config: null, users: [], profissionais: [], servicos: [], produtos: [], agendamentos: [], compras: [], vendas: [], lancamentos: [], sessions: {}, pushSubs: [], version: 1 });
+const blankEmp = () => ({ meta: {}, config: null, users: [], profissionais: [], servicos: [], produtos: [], agendamentos: [], compras: [], vendas: [], lancamentos: [], pedidos: [], sessions: {}, pushSubs: [], version: 1 });
 
 async function loadDB() {
   if (DB_URL) {
@@ -588,6 +588,75 @@ route('POST', '/api/asaas/webhook', null, async (req, b) => {
   } catch (e) { console.error('Webhook Asaas:', e.message); }
   return { ok: true };
 });
+/* ----- 🛍️ Loja online: catálogo de produtos num link, pedido e pagamento (Pix do próprio negócio) pelo celular ----- */
+const lojaCfg = E => ({ ativo: false, msg: '', entrega: false, taxa: 0, retirada: true, pagarNaEntrega: true, ...(E.config.loja || {}) });
+const pixLoja = E => { const px = E.config.pix || {}; return chavePixNormal(px.tipo, px.chave) ? px : null; };
+const noCatalogo = p => p && p.preco > 0 && p.loja !== false;
+function lojaPublica(E) {
+  const c = lojaCfg(E), emp = E.config.empresa || {};
+  return { negocio: E.config.negocio, nicho: E.config.nicho, logo: emp.logo ? `/m/${E.meta.slug}.logo` : '', whats: whatsEmpresa(E), cidade: emp.cidade || '', endereco: emp.endereco || '',
+    ativo: !!c.ativo && situacao(E) === 'ativa', msg: c.msg || '', entrega: !!c.entrega, taxa: Number(c.taxa) || 0, retirada: c.retirada !== false || !c.entrega, pagarNaEntrega: c.pagarNaEntrega !== false, pix: !!pixLoja(E),
+    produtos: E.produtos.filter(noCatalogo).sort((a, b) => (a.cat || '').localeCompare(b.cat || '') || a.nome.localeCompare(b.nome))
+      .map(p => ({ id: p.id, nome: p.nome, preco: p.preco, desc: p.desc || '', foto: p.foto || '', cat: p.cat || '', disp: Math.max(0, Math.floor(Number(p.qtd) || 0)) })) };
+}
+const STATUS_PED = ['novo', 'confirmado', 'pronto', 'concluido', 'cancelado'];
+const pedidoPub = (E, d) => ({ id: d.id, numero: d.numero, itens: d.itens, subtotal: d.subtotal, taxa: d.taxa, total: d.total, entrega: d.entrega, pagamento: d.pagamento, pago: d.pago, status: d.status, criado: d.criado, nome: d.nome, pagoInformado: d.pagoInformado || '',
+  pix: d.pagamento === 'pix' && !d.pago && d.status !== 'cancelado' ? pixPedido(E, d) : undefined, whats: whatsEmpresa(E) });
+function pixPedido(E, d) {
+  const px = pixLoja(E); if (!px) return undefined;
+  const nome = px.nome || E.config.negocio;
+  return { codigo: brCode(chavePixNormal(px.tipo, px.chave), nome, px.cidade || (E.config.empresa || {}).cidade, d.total, 'PD' + d.numero), chave: px.chave, tipo: px.tipo, nome };
+}
+route('GET', T + '/loja', 'empresa', req => lojaPublica(req.E));
+const pedidosIp = new Map();
+route('POST', T + '/loja/pedido', 'empresa', async (req, b) => {
+  const E = req.E, c = lojaCfg(E);
+  if (!c.ativo) fail(400, 'A loja online está fechada no momento.');
+  const lst = (pedidosIp.get(req.ip) || []).filter(t => Date.now() - t < 36e5);
+  if (lst.length >= 8) fail(429, 'Muitos pedidos deste aparelho. Fale com a loja pelo WhatsApp.');
+  const nome = str(b.nome, 80), tel = digits(b.tel);
+  if (nome.length < 2) fail(400, 'Informe seu nome.');
+  if (tel.length < 10 || tel.length > 13) fail(400, 'Informe seu WhatsApp com DDD.');
+  const entrega = b.entrega === 'entrega' && c.entrega ? 'entrega' : 'retirada';
+  const endereco = str(b.endereco, 200);
+  if (entrega === 'entrega' && endereco.length < 6) fail(400, 'Informe o endereço de entrega.');
+  const pagamento = b.pagamento === 'pix' && pixLoja(E) ? 'pix' : 'entrega';
+  if (pagamento === 'entrega' && c.pagarNaEntrega === false) fail(400, 'Esta loja só aceita Pix pelo site.');
+  const itens = [];
+  for (const it of (Array.isArray(b.itens) ? b.itens : []).slice(0, 40)) {
+    const p = E.produtos.find(x => x.id === it.id), qtd = Math.floor(Number(it.qtd) || 0);
+    if (!noCatalogo(p) || qtd < 1) continue;
+    if (qtd > (Number(p.qtd) || 0)) fail(409, `Só temos ${Math.max(0, Math.floor(p.qtd || 0))} un. de "${p.nome}". Ajuste a quantidade.`);
+    itens.push({ prodId: p.id, nome: p.nome, qtd, un: p.preco });
+  }
+  if (!itens.length) fail(400, 'Sua sacola está vazia.');
+  const subtotal = Math.round(itens.reduce((t, i) => t + i.qtd * i.un, 0) * 100) / 100, taxa = entrega === 'entrega' ? Math.max(0, Number(c.taxa) || 0) : 0;
+  E.meta.pedSeq = (E.meta.pedSeq || 0) + 1;
+  const d = { id: uid(), numero: E.meta.pedSeq, token: crypto.randomBytes(12).toString('hex'), nome, tel, entrega, endereco: entrega === 'entrega' ? endereco : '', obs: str(b.obs, 300),
+    pagamento, pago: false, itens, subtotal, taxa, total: Math.round((subtotal + taxa) * 100) / 100, status: 'novo', criado: new Date().toISOString() };
+  E.pedidos = [d, ...(E.pedidos || [])].slice(0, 300);
+  pedidosIp.set(req.ip, [...lst, Date.now()]);
+  changed(E); await gravarAgora();
+  pushAdmins(E, `🛍️ Novo pedido #${d.numero}`, `${nome} · ${itens.reduce((t, i) => t + i.qtd, 0)} item(ns) · ${brl(d.total)} · ${pagamento === 'pix' ? 'Pix' : 'paga na ' + entrega}`).catch(() => { });
+  return { ...pedidoPub(E, d), token: d.token };
+});
+const pedidoDoCliente = (E, id, token) => { const d = (E.pedidos || []).find(x => x.id === id); if (!d || !token || !igual(String(token), d.token)) fail(404, 'Pedido não encontrado.'); return d; };
+route('GET', T + '/loja/pedido/:id', 'empresa', (req, b, p) => pedidoPub(req.E, pedidoDoCliente(req.E, p.id, req.query.get('t'))));
+route('POST', T + '/loja/pedido/:id/paguei', 'empresa', (req, b, p) => {
+  const E = req.E, d = pedidoDoCliente(E, p.id, b.t);
+  if (!d.pagoInformado && !d.pago) { d.pagoInformado = new Date().toISOString(); salvar(E); pushAdmins(E, `💰 Pix informado · pedido #${d.numero}`, `${d.nome} disse que pagou ${brl(d.total)}. Confira no banco e confirme o pedido.`).catch(() => { }); }
+  return pedidoPub(E, d);
+});
+// Dono: lista e atualiza pedidos
+route('GET', T + '/pedidos', 'admin', req => ({ pedidos: (req.E.pedidos || []).map(({ token, ...d }) => d), loja: lojaCfg(req.E), pix: !!pixLoja(req.E) }));
+route('POST', T + '/pedidos/:id', 'admin', (req, b, p) => {
+  const E = req.E, d = (E.pedidos || []).find(x => x.id === p.id); if (!d) fail(404, 'Pedido não encontrado.');
+  if (b.status !== undefined) { if (!STATUS_PED.includes(b.status)) fail(400, 'Status inválido.'); d.status = b.status; d['em_' + b.status] = new Date().toISOString(); }
+  if (b.pago !== undefined) d.pago = !!b.pago;
+  if (b.vendaId !== undefined) d.vendaId = str(b.vendaId, 40);
+  changed(E);
+  const { token, ...pub } = d; return { pedido: pub };
+});
 route('GET', '/api/promo', null, () => ({ aberta: promoAberta(), ate: PROMO.ate, valor: PROMO.valor, dias: PROMO.dias, padrao: VALOR_PADRAO, online: !!ASAAS_KEY }));
 
 /* ----- empresa: público ----- */
@@ -1131,6 +1200,14 @@ function readBody(req, limit = 15e6) {
 }
 const escHtml = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 let INDEX_HTML = null;
+let LOJA_HTML = '';
+function paginaLoja(res, slug) {
+  LOJA_HTML = LOJA_HTML || fs.readFileSync(path.join(PUBLIC, 'loja.html'), 'utf8');
+  const E = EMP[slug], nome = escHtml(E.config.negocio);
+  let html = LOJA_HTML.replace(/\{\{NEGOCIO\}\}/g, nome).replace('{{ICONE}}', E.config.empresa?.logo ? `/m/${slug}.logo` : '/icons/icon-192.png');
+  res.writeHead(200, { 'Content-Type': MIME['.html'], 'Cache-Control': 'no-cache' });
+  res.end(html);
+}
 function paginaEmpresa(res, slug) {
   INDEX_HTML = INDEX_HTML || fs.readFileSync(path.join(PUBLIC, 'index.html'), 'utf8');
   const E = slug && EMP[slug];
@@ -1175,6 +1252,7 @@ function serveStatic(req, res, pathname) {
   else if (seg[0] === 'm' && seg.length === 2 && seg[1].endsWith('.webmanifest')) return manifestEmpresa(res, seg[1].replace('.webmanifest', ''));
   else if (seg[0] === 'm' && seg.length === 2 && seg[1].endsWith('.logo')) return logoEmpresa(res, seg[1].replace('.logo', ''));
   else if (seg.length === 1 && !seg[0].includes('.')) return paginaEmpresa(res, seg[0]);
+  else if (seg.length === 2 && seg[1] === 'loja' && EMP[seg[0]]) return paginaLoja(res, seg[0]);
   const file = path.normalize(path.join(PUBLIC, decodeURIComponent(pathname)));
   if (!file.startsWith(PUBLIC + path.sep) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) { res.writeHead(404, { 'Content-Type': 'text/plain' }); return res.end('Não encontrado'); }
   const ext = path.extname(file), size = fs.statSync(file).size;
@@ -1224,7 +1302,7 @@ const server = http.createServer(async (req, res) => {
         if (r.auth === 'staff' && u.role !== 'admin' && u.role !== 'func') fail(403, 'Acesso restrito à equipe.');
         req.user = u;
       }
-      if (situacao(E) !== 'ativa' && !url.pathname.endsWith('/public') && !/\/(assinatura(\/(pix|cartao|recorrente)|$)|login$)/.test(url.pathname)) fail(423, situacao(E) === 'vencida' ? 'Assinatura vencida. Fale com o suporte para renovar.' : 'Acesso suspenso. Fale com o suporte.');
+      if (situacao(E) !== 'ativa' && !url.pathname.endsWith('/public') && !url.pathname.endsWith('/loja') && !/\/(assinatura(\/(pix|cartao|recorrente)|$)|login$)/.test(url.pathname)) fail(423, situacao(E) === 'vencida' ? 'Assinatura vencida. Fale com o suporte para renovar.' : 'Acesso suspenso. Fale com o suporte.');
     }
     const body = ['POST', 'PUT', 'DELETE'].includes(req.method) ? await readBody(req) : {};
     send(res, 200, await r.fn(req, body, params));

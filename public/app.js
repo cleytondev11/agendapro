@@ -332,7 +332,7 @@ function renderLogin(tab = 'entrar') {
 
 /* ---------------- shell / navegação ---------------- */
 const NAV_ADMIN = [
-  ['dashboard', '📊', 'Dashboard'], ['agenda', '📅', 'Agenda'], ['vendas', '🛍️', 'Vendas'], ['financeiro', '💰', 'Financeiro'],
+  ['dashboard', '📊', 'Dashboard'], ['agenda', '📅', 'Agenda'], ['vendas', '🛍️', 'Vendas'], ['financeiro', '💰', 'Financeiro'], ['loja', '🛍️', 'Loja online'],
   ['estoque', '📦', 'Estoque'], ['compras', '🧾', 'Compras'], ['clientes', '👥', 'Clientes'], ['equipe', '🧑‍💼', 'Equipe'], ['servicos', '✂️', 'Serviços'], ['assinatura', '💳', 'Minha assinatura'], ['config', '⚙️', 'Ajustes'], ['instalar', '📲', 'Instalar app']
 ];
 const NAV_FUNC = [['agenda', '📅', 'Minha agenda'], ['resumo', '📈', 'Meu mês'], ['perfil', '👤', 'Perfil'], ['instalar', '📲', 'Instalar']];
@@ -362,6 +362,132 @@ function shell(title, actions, body) {
     ${extra.length ? `<a class="${extra.some(x => x[0] === view) ? 'on' : ''}" onclick="$('#more').classList.toggle('open')"><span class="i">☰</span>Mais</a>` : ''}</nav>
   <div class="more-menu nav" id="more">${extra.map(([k, i, l]) => `<a class="${view === k ? 'on' : ''}" onclick="go('${k}')"><span class="i">${i}</span>${l}</a>`).join('')}
     <a onclick="logout()"><span class="i">🚪</span>Sair</a></div>`;
+}
+
+/* ---------------- 🛍️ Loja online (catálogo + pedidos) ---------------- */
+function reduzirFoto(file, max = 560) {
+  return new Promise((ok, ko) => {
+    const img = new Image(), url = URL.createObjectURL(file);
+    img.onload = () => {
+      const lado = Math.min(img.width, img.height), sx = (img.width - lado) / 2, sy = (img.height - lado) / 2, t = Math.min(max, lado);
+      const c = document.createElement('canvas'); c.width = c.height = t;
+      c.getContext('2d').drawImage(img, sx, sy, lado, lado, 0, 0, t, t); URL.revokeObjectURL(url);
+      let q = .8, out = c.toDataURL('image/webp', q);
+      if (!out.startsWith('data:image/webp')) out = c.toDataURL('image/jpeg', q);
+      while (out.length > 90000 && q > .4) { q -= .1; out = c.toDataURL(out.startsWith('data:image/webp') ? 'image/webp' : 'image/jpeg', q); }
+      ok(out);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); ko(); };
+    img.src = url;
+  });
+}
+const linkLoja = () => `${location.origin}/${SLUG}/loja`;
+const ST_PED = { novo: ['🆕 Novo', 'warn'], confirmado: ['✅ Confirmado', 'ok'], pronto: ['📦 Pronto', 'ok'], concluido: ['✔️ Entregue', 'ok'], cancelado: ['✖ Cancelado', 'bad'] };
+async function vLoja(aba) {
+  ui.abaLoja = aba || ui.abaLoja || 'novos';
+  const cfg = { ativo: false, msg: '', entrega: false, taxa: 0, retirada: true, pagarNaEntrega: true, ...(S.config.loja || {}) };
+  const temPix = !!(S.config.pix && S.config.pix.chave);
+  const naLoja = S.produtos.filter(p => p.preco > 0 && p.loja !== false);
+  shell('Loja online', `<a class="btn ghost" href="${linkLoja()}" target="_blank" rel="noopener">Ver loja ↗</a>`, `
+    <div class="loja-hero ${cfg.ativo ? 'on' : ''}">
+      <div class="grow"><div class="lh-t">${cfg.ativo ? '🟢 Sua loja está aberta' : '⚪ Sua loja está fechada'}</div>
+        <div class="small" style="opacity:.85">${cfg.ativo ? 'Clientes podem ver os produtos, pedir e pagar pelo celular.' : 'Ative para receber pedidos pelo link.'}</div></div>
+      <button class="btn ${cfg.ativo ? 'ghost' : ''}" onclick="alternarLoja()">${cfg.ativo ? 'Fechar loja' : 'Abrir loja'}</button>
+    </div>
+    <div class="card"><h3>🔗 Link da sua loja</h3>
+      <div class="loja-link"><input readonly value="${linkLoja()}" onclick="this.select()"><button class="btn sm" onclick="copiarLinkLoja(this)">Copiar</button></div>
+      <div class="acts" style="margin-top:10px"><a class="btn sm" style="background:#25d366;color:#06301a" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(`🛍️ Confira os produtos da ${S.config.negocio || 'nossa loja'} e peça pelo celular: ${linkLoja()}`)}">Compartilhar no WhatsApp</a><button class="btn ghost sm" onclick="qrLoja()">QR Code</button></div>
+      <p class="mut small" style="margin-top:8px">Coloque na bio do Instagram, no status do WhatsApp ou imprima o QR Code no balcão.</p>
+      ${!temPix ? `<div class="loja-aviso">⚡ Cadastre sua <b>chave Pix</b> em <a href="#" onclick="go('config');return false">Ajustes → Pix e sinal</a> para o cliente pagar pelo celular. Sem ela, o pedido fica para pagar na retirada/entrega.</div>` : ''}
+      ${!naLoja.length ? `<div class="loja-aviso">📦 Nenhum produto na loja ainda. Cadastre produtos com <b>preço de venda</b> no Estoque.</div>` : ''}
+    </div>
+    <div class="card"><div class="loja-tabs">${[['novos', 'Novos'], ['andamento', 'Em andamento'], ['fim', 'Finalizados']].map(([k, t]) => `<button class="${ui.abaLoja === k ? 'on' : ''}" onclick="vLoja('${k}')">${t}<span id="cnt_${k}"></span></button>`).join('')}</div>
+      <div id="pedLista"><p class="mut" style="padding:14px 0">Carregando pedidos…</p></div></div>
+    <div class="card"><h3>📦 Produtos na loja <span class="mut small">(${naLoja.length} de ${S.produtos.filter(p => p.preco > 0).length})</span></h3>
+      <p class="mut small">Toque em ✏️ para colocar foto, descrição e categoria. Produtos sem preço de venda não aparecem.</p>
+      <div class="loja-prods">${S.produtos.filter(p => p.preco > 0).sort((a, b) => a.nome.localeCompare(b.nome)).map(p => `<div class="lp ${p.loja === false ? 'off' : ''}"><div class="th">${p.foto ? `<img src="${p.foto}" alt="">` : '📷'}</div>
+        <div class="grow"><b>${esc(p.nome)}</b><div class="small mut">${brl(p.preco)} · ${p.qtd > 0 ? `${p.qtd} em estoque` : '<span style="color:var(--bad)">esgotado</span>'}${p.cat ? ' · ' + esc(p.cat) : ''}</div></div>
+        <label class="sw" title="Mostrar na loja"><input type="checkbox" ${p.loja === false ? '' : 'checked'} onchange="prodNaLoja('${p.id}',this.checked)"><i></i></label>
+        <button class="icon-btn" onclick="ui.abrirLoja=1;formProduto('${p.id}');ui.abrirLoja=0">✏️</button></div>`).join('') || '<div class="empty">Nenhum produto com preço de venda.</div>'}</div>
+      <button class="btn ghost sm" style="margin-top:10px" onclick="ui.abrirLoja=1;formProduto();ui.abrirLoja=0">+ Novo produto</button>
+    </div>
+    <div class="card"><h3>⚙️ Configurações da loja</h3>
+      <form id="fLoja">
+        <label>Mensagem de boas-vindas <span class="mut">(opcional)</span></label><input name="msg" maxlength="160" value="${esc(cfg.msg)}" placeholder="Ex.: Retire em até 2 dias · Entregamos no bairro">
+        <label class="chk"><input type="checkbox" name="retirada" ${cfg.retirada !== false ? 'checked' : ''}> 🏪 Retirada na loja</label>
+        <label class="chk"><input type="checkbox" name="entrega" ${cfg.entrega ? 'checked' : ''}> 🛵 Fazer entrega</label>
+        <div class="row"><div><label>Taxa de entrega (R$)</label><input name="taxa" inputmode="decimal" value="${cfg.taxa ? String(cfg.taxa).replace('.', ',') : ''}" placeholder="0 = grátis"></div><div></div></div>
+        <label class="chk"><input type="checkbox" name="pagarNaEntrega" ${cfg.pagarNaEntrega !== false ? 'checked' : ''}> 💵 Aceitar pagamento na retirada/entrega</label>
+        <label class="chk" style="opacity:.8"><input type="checkbox" disabled ${temPix ? 'checked' : ''}> ⚡ Pix pelo celular ${temPix ? '(usa a chave de Ajustes → Pix)' : '(cadastre a chave em Ajustes → Pix)'}</label>
+        <button class="btn" style="margin-top:12px">Salvar configurações</button>
+      </form>
+    </div>`);
+  $('#fLoja').onsubmit = e => {
+    e.preventDefault(); const f = Object.fromEntries(new FormData(e.target));
+    S.config.loja = { ...cfg, msg: (f.msg || '').trim(), retirada: !!f.retirada, entrega: !!f.entrega, taxa: num(f.taxa), pagarNaEntrega: !!f.pagarNaEntrega };
+    if (!S.config.loja.retirada && !S.config.loja.entrega) S.config.loja.retirada = true;
+    save(); toast('Configurações da loja salvas'); vLoja();
+  };
+  carregarPedidos();
+}
+function alternarLoja() { S.config.loja = { retirada: true, pagarNaEntrega: true, ...(S.config.loja || {}), ativo: !(S.config.loja || {}).ativo }; save(); toast(S.config.loja.ativo ? '🟢 Loja aberta!' : 'Loja fechada'); vLoja(); }
+function prodNaLoja(id, on) { const p = byId('produtos', id); if (!p) return; p.loja = !!on; save(); }
+function copiarLinkLoja(b) { try { navigator.clipboard.writeText(linkLoja()).then(() => { b.textContent = 'Copiado!'; setTimeout(() => b.textContent = 'Copiar', 1500); }); } catch { toast(linkLoja()); } }
+function qrLoja() {
+  let svg = ''; try { const q = qrcode(0, 'M'); q.addData(linkLoja()); q.make(); svg = q.createSvgTag({ cellSize: 6, margin: 2, scalable: true }); } catch { }
+  openModal('QR Code da loja', `<div style="background:#fff;border-radius:16px;padding:12px;max-width:280px;margin:0 auto">${svg}</div>
+    <p class="mut small" style="text-align:center;margin-top:10px">Imprima e deixe no balcão: o cliente aponta a câmera e abre a loja.</p>
+    <div class="acts" style="justify-content:center;margin-top:12px"><button class="btn" onclick="baixarQrLoja()">Baixar imagem</button></div>`);
+}
+function baixarQrLoja() {
+  const svg = document.querySelector('#modal-body svg'); if (!svg) return;
+  const img = new Image(); img.onload = () => { const c = document.createElement('canvas'); c.width = c.height = 800; const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, 800, 800); x.drawImage(img, 40, 40, 720, 720); const a = document.createElement('a'); a.download = `qr-loja-${SLUG}.png`; a.href = c.toDataURL('image/png'); a.click(); };
+  img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(svg));
+}
+async function carregarPedidos() {
+  let r; try { r = await api('GET', '/api/pedidos'); } catch (e) { if ($('#pedLista')) $('#pedLista').innerHTML = `<p class="mut">${esc(e.message)}</p>`; return; }
+  if (view !== 'loja' || !$('#pedLista')) return;
+  ui.pedidos = r.pedidos;
+  const grupo = { novos: d => d.status === 'novo', andamento: d => d.status === 'confirmado' || d.status === 'pronto', fim: d => d.status === 'concluido' || d.status === 'cancelado' };
+  for (const k of Object.keys(grupo)) { const n = r.pedidos.filter(grupo[k]).length; const el = $('#cnt_' + k); if (el && n && k !== 'fim') el.textContent = n; }
+  const lista = r.pedidos.filter(grupo[ui.abaLoja]);
+  $('#pedLista').innerHTML = lista.length ? lista.map(d => {
+    const tel = String(d.tel || '').replace(/\D/g, ''), wa = `https://wa.me/${tel.length <= 11 ? '55' + tel : tel}`;
+    const pagTxt = d.pagamento === 'pix' ? (d.pago ? '<span class="pill ok">⚡ Pix pago</span>' : d.pagoInformado ? '<span class="pill warn">💰 Cliente disse que pagou</span>' : '<span class="pill">⚡ Pix pendente</span>') : (d.pago ? '<span class="pill ok">Pago</span>' : `<span class="pill">💵 Paga na ${d.entrega}</span>`);
+    const acoes = d.status === 'novo' ? `<button class="btn sm" onclick="statusPedido('${d.id}','confirmado')">Confirmar pedido</button>`
+      : d.status === 'confirmado' ? `<button class="btn sm" onclick="statusPedido('${d.id}','pronto')">${d.entrega === 'entrega' ? '🛵 Saiu para entrega' : '📦 Pronto para retirar'}</button>`
+      : d.status === 'pronto' ? `<button class="btn ok sm" onclick="concluirPedido('${d.id}')">✔️ Entregue (lançar venda)</button>` : '';
+    return `<div class="ped"><div class="ped-h"><b>#${d.numero} · ${esc(d.nome)}</b><span class="pill ${ST_PED[d.status][1]}">${ST_PED[d.status][0]}</span></div>
+      <div class="small mut">${new Date(d.criado).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })} · ${d.entrega === 'entrega' ? '🛵 Entrega' : '🏪 Retirada'}${d.endereco ? ' · ' + esc(d.endereco) : ''}</div>
+      <div class="ped-it">${d.itens.map(i => `<div><span>${i.qtd}× ${esc(i.nome)}</span><span>${brl(i.qtd * i.un)}</span></div>`).join('')}${d.taxa ? `<div><span>Entrega</span><span>${brl(d.taxa)}</span></div>` : ''}<div class="t"><span>Total</span><span>${brl(d.total)}</span></div></div>
+      ${d.obs ? `<div class="small" style="margin-top:6px">📝 ${esc(d.obs)}</div>` : ''}
+      <div style="margin-top:8px">${pagTxt}</div>
+      <div class="acts" style="margin-top:10px">${acoes}
+        ${d.pagamento === 'pix' && !d.pago && d.status !== 'cancelado' ? `<button class="btn ghost sm" onclick="pagoPedido('${d.id}')">Confirmar Pix recebido</button>` : ''}
+        <a class="btn ghost sm" target="_blank" rel="noopener" href="${wa}?text=${encodeURIComponent(`Olá, ${d.nome.split(' ')[0]}! Aqui é da ${S.config.negocio}. Sobre o seu pedido #${d.numero}: `)}">💬 WhatsApp</a>
+        ${d.status !== 'concluido' && d.status !== 'cancelado' ? `<button class="btn ghost sm" onclick="statusPedido('${d.id}','cancelado')">Cancelar</button>` : ''}</div></div>`;
+  }).join('') : `<div class="empty">${ui.abaLoja === 'novos' ? 'Nenhum pedido novo. Divulgue o link da loja! 🛍️' : 'Nada por aqui.'}</div>`;
+}
+async function statusPedido(id, st) {
+  if (st === 'cancelado' && !confirm('Cancelar este pedido?')) return;
+  try { await api('POST', '/api/pedidos/' + id, { status: st }); toast(ST_PED[st][0]); if (st === 'confirmado' || st === 'pronto') ui.abaLoja = 'andamento'; vLoja(); } catch (e) { toast(e.message); }
+}
+async function pagoPedido(id) { try { await api('POST', '/api/pedidos/' + id, { pago: true }); toast('Pagamento confirmado'); carregarPedidos(); } catch (e) { toast(e.message); } }
+function concluirPedido(id) {
+  const d = (ui.pedidos || []).find(x => x.id === id); if (!d) return;
+  openModal(`Entregar pedido #${d.numero}`, `<form>
+    <p class="small">${d.itens.map(i => `${i.qtd}× ${esc(i.nome)}`).join(', ')} · <b>${brl(d.total)}</b></p>
+    <label>Forma de pagamento</label><select name="pag">${PAGTOS.map(p => `<option ${(d.pagamento === 'pix' && p === 'Pix') ? 'selected' : ''}>${p}</option>`).join('')}</select>
+    <p class="mut small" style="margin-top:8px">Vamos lançar a venda, dar baixa no estoque e registrar a entrada no Financeiro.</p>
+    ${foot('Concluir pedido')}</form>`, async f => {
+    const vid = uid(), itens = d.itens.map(i => ({ prodId: i.prodId, nome: i.nome, qtd: i.qtd, un: i.un }));
+    itens.forEach(i => { const p = byId('produtos', i.prodId); if (p) p.qtd -= i.qtd; });
+    S.vendas.push({ id: vid, data: today(), cliente: d.nome, itens, total: d.total, pagamento: f.pag, pedido: d.numero });
+    lancar('entrada', `Pedido online #${d.numero}: ${itens.map(i => i.nome).join(', ')}`, d.total, 'Venda de produto', today(), vid, f.pag);
+    save();
+    await api('POST', '/api/pedidos/' + id, { status: 'concluido', pago: true, vendaId: vid });
+    toast('Pedido entregue e venda lançada'); ui.abaLoja = 'fim'; vLoja();
+  });
 }
 
 /* ---------------- Minha assinatura (dono) ---------------- */
@@ -440,7 +566,7 @@ function go(v, keepScroll) {
   const mudou = v !== view;
   view = v;
   if (v === 'agendar' && mudou) ui.slots = {};
-  ({ dashboard: vDashboard, agenda: vAgenda, vendas: vVendas, financeiro: vFinanceiro, estoque: vEstoque, compras: vCompras, clientes: vClientes, equipe: vEquipe, servicos: vServicos, config: vConfig, assinatura: vAssinatura, agendar: vAgendar, meus: vMeus, perfil: isFunc() ? vPerfilFunc : vPerfil, resumo: vResumo, instalar: vInstalar })[v]();
+  ({ dashboard: vDashboard, agenda: vAgenda, vendas: vVendas, financeiro: vFinanceiro, estoque: vEstoque, compras: vCompras, clientes: vClientes, equipe: vEquipe, servicos: vServicos, config: vConfig, assinatura: vAssinatura, loja: vLoja, agendar: vAgendar, meus: vMeus, perfil: isFunc() ? vPerfilFunc : vPerfil, resumo: vResumo, instalar: vInstalar })[v]();
   if (!keepScroll) window.scrollTo(0, 0);
 }
 
@@ -1054,13 +1180,29 @@ function formProduto(id) {
       <div><label>Preço de venda <span class="mut">(0 = uso interno)</span></label><input name="preco" inputmode="decimal" value="${p?.preco ?? ''}"></div></div>
     <div class="row"><div><label>Quantidade atual</label><input name="qtd" inputmode="decimal" value="${p?.qtd ?? 0}" ${p ? 'disabled' : ''}></div>
       <div><label>Estoque mínimo</label><input name="min" inputmode="decimal" value="${p?.min ?? 2}"></div></div>
+    <details class="prod-loja" ${p?.foto || p?.desc || ui.abrirLoja ? 'open' : ''}><summary>🛍️ Loja online <span class="mut">(foto, descrição, categoria)</span></summary>
+      <label class="chk"><input type="checkbox" name="loja" ${p?.loja === false ? '' : 'checked'}> Mostrar na loja online <span class="mut">(precisa ter preço de venda)</span></label>
+      <div class="foto-up"><div class="foto-prev" id="fotoPrev">${p?.foto ? `<img src="${p.foto}" alt="">` : '📷'}</div>
+        <div><label class="btn ghost sm" style="display:inline-flex">Escolher foto<input type="file" accept="image/*" id="fotoIn" hidden></label>
+        <button type="button" class="btn ghost sm" id="fotoDel" ${p?.foto ? '' : 'hidden'}>Remover</button><p class="mut small" style="margin-top:6px">Foto quadrada fica melhor. Ela é reduzida automaticamente.</p></div></div>
+      <label>Descrição <span class="mut">(opcional)</span></label><textarea name="desc" rows="2" maxlength="300" placeholder="Ex.: 250 ml · fixação forte · para cabelos secos">${esc(p?.desc || '')}</textarea>
+      <label>Categoria <span class="mut">(opcional)</span></label><input name="cat" list="dlCat" maxlength="40" value="${esc(p?.cat || '')}" placeholder="Ex.: Cabelo, Barba, Kits">
+      <datalist id="dlCat">${[...new Set(S.produtos.map(x => x.cat).filter(Boolean))].map(c => `<option value="${esc(c)}">`).join('')}</datalist>
+    </details>
     ${p ? `<p class="mut small" style="margin-top:8px">Para mudar a quantidade use Compras, Vendas ou o botão ±.</p><button type="button" class="btn bad sm" style="margin-top:10px" onclick="if(confirm('Excluir produto?')){S.produtos=S.produtos.filter(x=>x.id!=='${p.id}');save();closeModal();vEstoque()}">Excluir produto</button>` : ''}
     ${foot()}
   </form>`, f => {
-    const d = { nome: f.nome.trim(), custo: num(f.custo), preco: num(f.preco), min: num(f.min) };
-    if (p) Object.assign(p, d); else S.produtos.push({ id: uid(), qtd: num(f.qtd), ...d });
-    save(); vEstoque();
+    const d = { nome: f.nome.trim(), custo: num(f.custo), preco: num(f.preco), min: num(f.min), loja: f.loja === 'on', desc: (f.desc || '').trim().slice(0, 300), cat: (f.cat || '').trim().slice(0, 40), foto: ui.fotoProd ?? p?.foto ?? '' };
+    if (!d.foto) delete d.foto;
+    if (p) { Object.assign(p, d); if (!d.foto) delete p.foto; } else S.produtos.push({ id: uid(), qtd: num(f.qtd), ...d });
+    ui.fotoProd = undefined; save(); view === 'loja' ? vLoja() : vEstoque();
   });
+  ui.fotoProd = undefined;
+  $('#fotoIn')?.addEventListener('change', async e => {
+    const file = e.target.files[0]; if (!file) return;
+    try { ui.fotoProd = await reduzirFoto(file); $('#fotoPrev').innerHTML = `<img src="${ui.fotoProd}" alt="">`; $('#fotoDel').hidden = false; } catch { toast('Não consegui ler essa imagem.'); }
+  });
+  $('#fotoDel')?.addEventListener('click', () => { ui.fotoProd = ''; $('#fotoPrev').textContent = '📷'; $('#fotoDel').hidden = true; });
 }
 function ajusteEstoque(id) {
   const p = byId('produtos', id);
