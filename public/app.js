@@ -633,7 +633,15 @@ const tagApp = a => a.criadoPor === 'cliente' ? ' <span class="pill app">📱 ap
 
 /* ================= ADMIN ================= */
 
+function contarPedidosNovos() {
+  if (me?.role !== 'admin' || !(S.config.loja || {}).ativo) return;
+  api('GET', '/api/pedidos').then(r => {
+    const n = r.pedidos.filter(d => d.status === 'novo').length, el = $('#atLojaN');
+    if (el && view === 'dashboard') { el.hidden = !n; el.textContent = n; if (n) $('#atLoja').textContent = `${n} pedido${n > 1 ? 's' : ''} novo${n > 1 ? 's' : ''}`; }
+  }).catch(() => { });
+}
 function vDashboard() {
+  setTimeout(contarPedidosNovos, 50);
   const hoje = today(), mes = mesAtual();
   const lm = S.lancamentos.filter(l => l.data.startsWith(mes));
   const entMes = lm.filter(l => l.tipo === 'entrada').reduce((s, l) => s + l.valor, 0);
@@ -655,6 +663,12 @@ function vDashboard() {
   const topMax = top[0]?.[1] || 1;
 
   shell('Dashboard', `<button class="btn ghost" onclick="formMetas()">🎯 Metas</button><button class="btn" onclick="novoAgendamento()">+ Agendamento</button>`, `
+  <div class="atalhos" role="navigation" aria-label="Atalhos rápidos">
+    <button class="at" style="--c:#3fbf8a" onclick="formItens('venda')"><i>🛍️</i><b>Nova venda</b><small>balcão</small></button>
+    <button class="at" style="--c:#4e7cff" onclick="go('loja')"><i>🛒</i><b>Loja online</b><small id="atLoja">${(S.config.loja || {}).ativo ? 'aberta' : 'fechada'}</small><span class="bdg" id="atLojaN" hidden></span></button>
+    <button class="at" style="--c:#f0b54a" onclick="formItens('compra')"><i>🧾</i><b>Nova compra</b><small>fornecedor</small></button>
+    <button class="at" style="--c:#a49cb3" onclick="go('config')"><i>⚙️</i><b>Ajustes</b><small>dados e Pix</small></button>
+  </div>
   ${window.Tour ? Tour.blocoPassos() : ''}
   ${blocoPendencias()}
   ${blocoMetas()}
