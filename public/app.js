@@ -381,6 +381,15 @@ function reduzirFoto(file, max = 560) {
     img.src = url;
   });
 }
+function fotoRapida(id) {
+  const p = byId('produtos', id); if (!p) return;
+  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*';
+  inp.onchange = async () => {
+    const file = inp.files[0]; if (!file) return;
+    try { p.foto = await reduzirFoto(file); save(); toast('📷 Foto salva'); go(view, true); } catch { toast('Não consegui ler essa imagem. Tente outra.'); }
+  };
+  inp.click();
+}
 const linkLoja = () => `${location.origin}/${SLUG}/loja`;
 const ST_PED = { novo: ['🆕 Novo', 'warn'], confirmado: ['✅ Confirmado', 'ok'], pronto: ['📦 Pronto', 'ok'], concluido: ['✔️ Entregue', 'ok'], cancelado: ['✖ Cancelado', 'bad'] };
 async function vLoja(aba) {
@@ -404,9 +413,10 @@ async function vLoja(aba) {
     <div class="card"><div class="loja-tabs">${[['novos', 'Novos'], ['andamento', 'Em andamento'], ['fim', 'Finalizados']].map(([k, t]) => `<button class="${ui.abaLoja === k ? 'on' : ''}" onclick="vLoja('${k}')">${t}<span id="cnt_${k}"></span></button>`).join('')}</div>
       <div id="pedLista"><p class="mut" style="padding:14px 0">Carregando pedidos…</p></div></div>
     <div class="card"><h3>📦 Produtos na loja <span class="mut small">(${naLoja.length} de ${S.produtos.filter(p => p.preco > 0).length})</span></h3>
-      <p class="mut small">Toque em ✏️ para colocar foto, descrição e categoria. Produtos sem preço de venda não aparecem.</p>
-      <div class="loja-prods">${S.produtos.filter(p => p.preco > 0).sort((a, b) => a.nome.localeCompare(b.nome)).map(p => `<div class="lp ${p.loja === false ? 'off' : ''}"><div class="th">${p.foto ? `<img src="${p.foto}" alt="">` : '📷'}</div>
+      <p class="mut small">Toque em <b>📷</b> para colocar a foto (tire na hora ou escolha da galeria). Em ✏️ você coloca descrição e categoria. Produtos sem preço de venda não aparecem.</p>
+      <div class="loja-prods">${S.produtos.filter(p => p.preco > 0).sort((a, b) => a.nome.localeCompare(b.nome)).map(p => `<div class="lp ${p.loja === false ? 'off' : ''}"><button class="th th-btn" title="${p.foto ? 'Trocar foto' : 'Adicionar foto'}" onclick="fotoRapida('${p.id}')">${p.foto ? `<img src="${p.foto}" alt="">` : '<span>📷<small>foto</small></span>'}</button>
         <div class="grow"><b>${esc(p.nome)}</b><div class="small mut">${brl(p.preco)} · ${p.qtd > 0 ? `${p.qtd} em estoque` : '<span style="color:var(--bad)">esgotado</span>'}${p.cat ? ' · ' + esc(p.cat) : ''}</div></div>
+        <button class="btn ghost sm hide-sm" onclick="fotoRapida('${p.id}')">${p.foto ? '🔄 Trocar foto' : '📷 Colocar foto'}</button>
         <label class="sw" title="Mostrar na loja"><input type="checkbox" ${p.loja === false ? '' : 'checked'} onchange="prodNaLoja('${p.id}',this.checked)"><i></i></label>
         <button class="icon-btn" onclick="ui.abrirLoja=1;formProduto('${p.id}');ui.abrirLoja=0">✏️</button></div>`).join('') || '<div class="empty">Nenhum produto com preço de venda.</div>'}</div>
       <button class="btn ghost sm" style="margin-top:10px" onclick="ui.abrirLoja=1;formProduto();ui.abrirLoja=0">+ Novo produto</button>
@@ -1173,7 +1183,7 @@ function vEstoque() {
   </div>
   <div class="filters"><input placeholder="Buscar produto…" value="${esc(ui.busca)}" oninput="buscar(this.value,vEstoque)"></div>
   <div class="card">${lista.length ? `<div class="tbl-wrap"><table><tr><th>Produto</th><th>Qtd</th><th>Mín.</th><th>Custo</th><th>Venda</th><th></th></tr>
-  ${lista.map(p => `<tr><td><b>${esc(p.nome)}</b>${p.preco ? '' : ' <span class="pill">uso interno</span>'}</td><td>${p.qtd <= p.min ? `<span class="pill baixo">${p.qtd}</span>` : p.qtd}</td><td>${p.min}</td><td>${brl(p.custo)}</td><td>${p.preco ? brl(p.preco) : '—'}</td>
+  ${lista.map(p => `<tr><td><span class="est-prod"><button class="th th-btn" title="${p.foto ? 'Trocar foto' : 'Adicionar foto'}" onclick="fotoRapida('${p.id}')">${p.foto ? `<img src="${p.foto}" alt="">` : '📷'}</button><b>${esc(p.nome)}</b></span>${p.preco ? '' : ' <span class="pill">uso interno</span>'}</td><td>${p.qtd <= p.min ? `<span class="pill baixo">${p.qtd}</span>` : p.qtd}</td><td>${p.min}</td><td>${brl(p.custo)}</td><td>${p.preco ? brl(p.preco) : '—'}</td>
   <td class="acts"><button class="btn ghost sm" onclick="ajusteEstoque('${p.id}')">±</button><button class="icon-btn" onclick="formProduto('${p.id}')">✏️</button></td></tr>`).join('')}</table></div>` : '<div class="empty">Nenhum produto.</div>'}</div>`);
 }
 function buscar(v, fn) {
@@ -1189,10 +1199,10 @@ function formProduto(id) {
       <div><label>Preço de venda <span class="mut">(0 = uso interno)</span></label><input name="preco" inputmode="decimal" value="${p?.preco ?? ''}"></div></div>
     <div class="row"><div><label>Quantidade atual</label><input name="qtd" inputmode="decimal" value="${p?.qtd ?? 0}" ${p ? 'disabled' : ''}></div>
       <div><label>Estoque mínimo</label><input name="min" inputmode="decimal" value="${p?.min ?? 2}"></div></div>
-    <details class="prod-loja" ${p?.foto || p?.desc || ui.abrirLoja ? 'open' : ''}><summary>🛍️ Loja online <span class="mut">(foto, descrição, categoria)</span></summary>
+    <details class="prod-loja" open><summary>📷 Foto e loja online <span class="mut">(foto, descrição, categoria)</span></summary>
       <label class="chk"><input type="checkbox" name="loja" ${p?.loja === false ? '' : 'checked'}> Mostrar na loja online <span class="mut">(precisa ter preço de venda)</span></label>
       <div class="foto-up"><div class="foto-prev" id="fotoPrev">${p?.foto ? `<img src="${p.foto}" alt="">` : '📷'}</div>
-        <div><label class="btn ghost sm" style="display:inline-flex">Escolher foto<input type="file" accept="image/*" id="fotoIn" hidden></label>
+        <div><label class="btn sm" style="display:inline-flex">${p?.foto ? '🔄 Trocar foto' : '📷 Colocar foto'}<input type="file" accept="image/*" id="fotoIn" hidden></label>
         <button type="button" class="btn ghost sm" id="fotoDel" ${p?.foto ? '' : 'hidden'}>Remover</button><p class="mut small" style="margin-top:6px">Foto quadrada fica melhor. Ela é reduzida automaticamente.</p></div></div>
       <label>Descrição <span class="mut">(opcional)</span></label><textarea name="desc" rows="2" maxlength="300" placeholder="Ex.: 250 ml · fixação forte · para cabelos secos">${esc(p?.desc || '')}</textarea>
       <label>Categoria <span class="mut">(opcional)</span></label><input name="cat" list="dlCat" maxlength="40" value="${esc(p?.cat || '')}" placeholder="Ex.: Cabelo, Barba, Kits">
