@@ -422,15 +422,23 @@ async function vLoja(aba) {
         <button class="btn" style="margin-top:12px">Salvar configurações</button>
       </form>
     </div>`);
-  $('#fLoja').onsubmit = e => {
+  $('#fLoja').onsubmit = async e => {
     e.preventDefault(); const f = Object.fromEntries(new FormData(e.target));
-    S.config.loja = { ...cfg, msg: (f.msg || '').trim(), retirada: !!f.retirada, entrega: !!f.entrega, taxa: num(f.taxa), pagarNaEntrega: !!f.pagarNaEntrega };
-    if (!S.config.loja.retirada && !S.config.loja.entrega) S.config.loja.retirada = true;
-    save(); toast('Configurações da loja salvas'); vLoja();
+    try { await salvarLoja({ msg: (f.msg || '').trim(), retirada: !!f.retirada, entrega: !!f.entrega, taxa: num(f.taxa), pagarNaEntrega: !!f.pagarNaEntrega }); toast('Configurações da loja salvas'); }
+    catch (er) { toast('Não salvou: ' + er.message, 4000); }
+    vLoja();
   };
   carregarPedidos();
 }
-function alternarLoja() { S.config.loja = { retirada: true, pagarNaEntrega: true, ...(S.config.loja || {}), ativo: !(S.config.loja || {}).ativo }; save(); toast(S.config.loja.ativo ? '🟢 Loja aberta!' : 'Loja fechada'); vLoja(); }
+async function salvarLoja(d) {
+  const r = await api('POST', '/api/loja/config', d);
+  S.config.loja = r.loja; snap.config = { ...snap.config, loja: clone(r.loja) }; // já está salvo no servidor
+  return r.loja;
+}
+async function alternarLoja() {
+  try { const l = await salvarLoja({ ativo: !(S.config.loja || {}).ativo }); toast(l.ativo ? '🟢 Loja aberta!' : 'Loja fechada'); } catch (e) { toast('Não salvou: ' + e.message, 4000); }
+  vLoja();
+}
 function prodNaLoja(id, on) { const p = byId('produtos', id); if (!p) return; p.loja = !!on; save(); }
 function copiarLinkLoja(b) { try { navigator.clipboard.writeText(linkLoja()).then(() => { b.textContent = 'Copiado!'; setTimeout(() => b.textContent = 'Copiar', 1500); }); } catch { toast(linkLoja()); } }
 function qrLoja() {
@@ -447,6 +455,7 @@ function baixarQrLoja() {
 async function carregarPedidos() {
   let r; try { r = await api('GET', '/api/pedidos'); } catch (e) { if ($('#pedLista')) $('#pedLista').innerHTML = `<p class="mut">${esc(e.message)}</p>`; return; }
   if (view !== 'loja' || !$('#pedLista')) return;
+  if (JSON.stringify(r.loja) !== JSON.stringify(S.config.loja || null) && r.loja) { S.config.loja = r.loja; snap.config = { ...snap.config, loja: clone(r.loja) }; return vLoja(); }
   ui.pedidos = r.pedidos;
   const grupo = { novos: d => d.status === 'novo', andamento: d => d.status === 'confirmado' || d.status === 'pronto', fim: d => d.status === 'concluido' || d.status === 'cancelado' };
   for (const k of Object.keys(grupo)) { const n = r.pedidos.filter(grupo[k]).length; const el = $('#cnt_' + k); if (el && n && k !== 'fim') el.textContent = n; }

@@ -647,8 +647,22 @@ route('POST', T + '/loja/pedido/:id/paguei', 'empresa', (req, b, p) => {
   if (!d.pagoInformado && !d.pago) { d.pagoInformado = new Date().toISOString(); salvar(E); pushAdmins(E, `💰 Pix informado · pedido #${d.numero}`, `${d.nome} disse que pagou ${brl(d.total)}. Confira no banco e confirme o pedido.`).catch(() => { }); }
   return pedidoPub(E, d);
 });
+// Dono: liga/desliga e configura a loja (rota própria: o que aparece no app é o que está salvo no servidor)
+route('POST', T + '/loja/config', 'admin', async (req, b) => {
+  const E = req.E, c = lojaCfg(E), d = {};
+  if (b.ativo !== undefined) d.ativo = !!b.ativo;
+  if (b.msg !== undefined) d.msg = str(b.msg, 160);
+  if (b.retirada !== undefined) d.retirada = !!b.retirada;
+  if (b.entrega !== undefined) d.entrega = !!b.entrega;
+  if (b.taxa !== undefined) d.taxa = Math.max(0, Math.min(999, Math.round(n(b.taxa) * 100) / 100));
+  if (b.pagarNaEntrega !== undefined) d.pagarNaEntrega = !!b.pagarNaEntrega;
+  const novo = { ...c, ...d }; if (!novo.retirada && !novo.entrega) novo.retirada = true;
+  E.config.loja = novo; changed(E);
+  if (!(await gravarAgora())) fail(503, ERRO_BANCO);
+  return { loja: novo, situacao: situacao(E) };
+});
 // Dono: lista e atualiza pedidos
-route('GET', T + '/pedidos', 'admin', req => ({ pedidos: (req.E.pedidos || []).map(({ token, ...d }) => d), loja: lojaCfg(req.E), pix: !!pixLoja(req.E) }));
+route('GET', T + '/pedidos', 'admin', req => ({ pedidos: (req.E.pedidos || []).map(({ token, ...d }) => d), loja: lojaCfg(req.E), pix: !!pixLoja(req.E), situacao: situacao(req.E) }));
 route('POST', T + '/pedidos/:id', 'admin', (req, b, p) => {
   const E = req.E, d = (E.pedidos || []).find(x => x.id === p.id); if (!d) fail(404, 'Pedido não encontrado.');
   if (b.status !== undefined) { if (!STATUS_PED.includes(b.status)) fail(400, 'Status inválido.'); d.status = b.status; d['em_' + b.status] = new Date().toISOString(); }
@@ -858,7 +872,7 @@ route('POST', T + '/sync', 'staff', (req, b) => {
   if (req.user.role === 'func') return syncFuncionario(E, req.user, Array.isArray(b.changes) ? b.changes : []);
   for (const ch of Array.isArray(b.changes) ? b.changes : []) {
     if (ch.col === 'config') {
-      if (ch.doc && typeof ch.doc === 'object') { const { nicho, ...resto } = ch.doc; if ('empresa' in resto) resto.empresa = limparEmpresa(resto.empresa); if ('pix' in resto) resto.pix = limparPix(resto.pix); E.config = { ...E.config, ...resto }; } // nicho só pela Central
+      if (ch.doc && typeof ch.doc === 'object') { const { nicho, loja, ...resto } = ch.doc; if ('empresa' in resto) resto.empresa = limparEmpresa(resto.empresa); if ('pix' in resto) resto.pix = limparPix(resto.pix); E.config = { ...E.config, ...resto }; } // nicho só pela Central; loja só pela rota própria (evita outro aparelho desfazer)
       continue;
     }
     if (!COLS.includes(ch.col)) continue;
